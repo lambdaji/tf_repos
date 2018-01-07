@@ -1,24 +1,44 @@
-#coding=utf8
+#!/usr/bin/env python
+#coding=utf-8
 
-import tensorflow as tf
+#from __future__ import absolute_import
+#from __future__ import division
+#from __future__ import print_function
+
+#import argparse
+#import shutil
+#import sys
+#import os
+#import glob
+#from datetime import date, timedelta
 from time import time
+#import gc
+#from multiprocessing import Process
 
-######cmd line######
-flags = tf.app.flags.FLAGS
-flags.DEFINE_integer("feature_size", 16, "Number of features")
-flags.DEFINE_integer("field_size", 16, "Number of fields")
-flags.DEFINE_integer("embedding_size", 16, "Embedding size")
-flags.DEFINE_integer("epochs", 16, "Number of epochs")
-flags.DEFINE_integer("batch_size", 16, "Number of batch size")
-flags.DEFINE_float("learning_rate", 0.001, "learning rate")
-flags.DEFINE_float("l2_reg", 0.01, "L2 regularization")
-flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
-flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, GD, Momentum}")
-flags.DEFINE_string("deep_layers", '128,64,32', "deep layers")
-flags.DEFINE_string("tr_dir", '/ceph_ai/data/', "train data dir")
-flags.DEFINE_string("model_dir", '/ceph_ai/model/', "model check point dir")
-flags.DEFINE_string("task_type", 'train', "task type {train, predict, evaluate}")
+#import math
+import pandas as pd
+import numpy as np
+import tensorflow as tf
 
+#################### CMD Arguments ####################
+FLAGS = tf.app.flags.FLAGS
+tf.app.flags.DEFINE_integer("feature_size", 16, "Number of features")
+tf.app.flags.DEFINE_integer("field_size", 16, "Number of fields")
+tf.app.flags.DEFINE_integer("embedding_size", 16, "Embedding size")
+tf.app.flags.DEFINE_integer("epochs", 16, "Number of epochs")
+tf.app.flags.DEFINE_integer("batch_size", 16, "Number of batch size")
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
+tf.app.flags.DEFINE_float("l2_reg", 0.01, "L2 regularization")
+tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
+tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, GD, Momentum}")
+tf.app.flags.DEFINE_string("deep_layers", '128,64,32', "deep layers")
+tf.app.flags.DEFINE_string("tr_dir", '/ceph_ai/data/', "train data dir")
+tf.app.flags.DEFINE_string("model_dir", '/ceph_ai/model/', "model check point dir")
+tf.app.flags.DEFINE_string("task_type", 'train', "task type {train, predict, evaluate}")
+
+'''
+Init a tensorflow Graph containing: input data, variables, model, loss, optimizer
+'''
 graph = tf.Graph()
 sess = tf.Session()
 with graph.as_default():
