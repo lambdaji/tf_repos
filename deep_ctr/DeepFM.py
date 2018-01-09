@@ -40,20 +40,91 @@ class DeepFM(object):
     """docstring fo DeepFM."""
     def __init__(self, arg):
         super(DeepFM, self).__init__()
-        self.fw_b = None     #bias
-        self.fw_l = None     #fm linear weights
-        self.fw_v = None     #embedding v
+        self.FM_B = None     #bias
+        self.FM_W = None     #fm linear weights
+        self.FM_V = None     #embedding v
+
+        self.init_graph()
 
     def init_graph(self):
         """Init a tensorflow Graph containing: input data, variables, model, loss, optimizer"""
         graph = tf.Graph()
         with graph.as_default():
-            #------model weights------
-	        self.fw_b = tf.get_variable(name='fm_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-	        self.fw_l = tf.get_variable(name='fm_w', shape=[FLAGS.feature_size], initializer=tf.glorot_normal_initializer())
-	        self.fw_v = tf.get_variable(name='fm_v', shape=[FLAGS.feature_size,FLAGS.embedding_size], initializer=tf.glorot_normal_initializer())
+            #------initialize weights------
+	        self.FM_B = tf.get_variable(name='fm_bias', shape=[1], initializer=tf.constant_initializer(0.0))
+	        self.FM_W = tf.get_variable(name='fm_w', shape=[FLAGS.feature_size], initializer=tf.glorot_normal_initializer())
+	        self.FM_V = tf.get_variable(name='fm_v', shape=[FLAGS.feature_size,FLAGS.embedding_size], initializer=tf.glorot_normal_initializer())
 
-            y = model_fn()
+            #------build feaure-------
+            self.iterator = input_fn(FLAGS.tr_dir, True, FLAGS.batch_size, FLAGS.epochs)
+            self.feat_ids, self.feat_vals, self.labels = self.iterator.get_next()
+
+            #------FM first-order------
+            with tf.variable_scope("first-order"):
+            	feat_wgts = tf.nn.embedding_lookup(self.FM_W, self.feat_ids) # None * F * 1
+            	y_w = tf.reduce_sum(tf.mulitply(self.feat_wgts, self.feat_vals),1)
+
+            #------FM second-order------
+            with tf.variable_scope("second-order"):
+            	embeddings = tf.nn.embedding_lookup(self.FM_V, self.feat_ids) # None * F * K
+                #feat_vals = tf.reshape(self.feat_vals, shape=[-1, FLAGS.field_size, 1])
+            	embeddings = tf.multiply(embeddings, self.feat_vals) #vij*xi
+            	sum_square = tf.square(tf.reduce_sum(embeddings,1))
+            	square_sum = tf.reduce_sum(tf.square(embeddings),1)
+            	y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
+
+            #------mlp------
+            with tf.variable_scope("deep"):
+            	deep_inputs = tf.reshape(embeddings,shape=[-1,FLAGS.field_size*FLAGS.embedding_size]) # None * (F*K)
+            	layers = map(int,FLAGS.deep_layers.split(','))
+            	for i in range(len(layers)):
+            		deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
+            						weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.l2_reg), scope='mlp%d' % i)
+                y_deep = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
+            						weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.l2_reg), scope='deep_out')
+            	#sig_wgts = tf.get_variable(name='sigmoid_weights', shape=[layers[-1]], initializer=tf.glorot_normal_initializer())
+            	#sig_bias = tf.get_variable(name='sigmoid_bias', shape=[1], initializer=tf.constant_initializer(0.0))
+            	#deep_out = tf.nn.xw_plus_b(deep_inputs,sig_wgts,sig_bias,name='deep_out')
+
+            #------sigmoid------
+            with tf.variable_scope("deepfm"):
+            	y_bias = self.FM_B * tf.ones_like(self.labels)  # None * 1
+            	self.y = tf.sigmoid(y_bias + y_w + y_v + y_deep)
+
+            #------calc auc------
+        	self.auc = tf.contrib.metrics.streaming_auc(y, self.label)
+
+        	#------bulid loss------
+        	#lossL2 = tf.add_n([ tf.nn.l2_loss(v) for v in vars if 'bias' not in v.name ]) * 0.001
+        	self.loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=self.label)) + \
+                                FLAGS.l2_reg * tf.nn.l2_loss(self.FM_W) + \
+                                FLAGS.l2_reg * tf.nn.l2_loss(self.FM_V) #+ \ FLAGS.l2_reg * tf.nn.l2_loss(sig_wgts)
+
+        	#------bulid optimizer------
+        	if FLAGS.optimizer_type == 'Adam':
+                self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8).minimize(self.loss)
+            elif FLAGS.optimizer_type == 'Adagrad':
+                self.optimizer = tf.train.AdagradOptimizer(learning_rate=FLAGS.learning_rate, initial_accumulator_value=1e-8).minimize(loss)
+            elif FLAGS.optimizer_type == 'Momentum':
+                self.optimizer = tf.train.MomentumOptimizer(learning_rate=FLAGS.learning_rate, momentum=0.95).minimize(loss)
+            elif FLAGS.optimizer_type == 'ftrl':
+                self.optimizer = tf.train.FtrlOptimizer(FLAGS.learning_rate).minimize(loss)
+
+            #------summary for TensorBoard-------
+            tf.summary.scalar('tr_loss', self.loss)
+            tf.summary.scalar('tr_auc', self.auc)
+            #tf.summary.histogram('fm_w_hist', wl)
+            #tf.summary.histogram('fm_v_hist', wv)
+            #for i in range(len(layers)):
+            #	tf.summary.histogram('nn_layer'+str(idx)+'_weights', w_nn_params[idx])
+            merged_summary = tf.summary.merge_all()
+
+            #------init--------
+            init = tf.global_variables_initializer()
+            self.sess = tf.Session()
+            self.sess.run(init)
+
+            #return loss, auc, optimizer
 
     #1 1:0.5 2:0.03519 3:1 4:0.02567 7:0.03708 8:0.01705 9:0.06296 10:0.18185 11:0.02497 12:1 14:0.02565 15:0.03267 17:0.0247 18:0.03158 20:1 22:1 23:0.13169 24:0.02933 27:0.18159 31:0.0177 34:0.02888 38:1 51:1 63:1 132:1 164:1 236:1
     def input_fn(filenames, batch_size=32, num_epochs=1, perform_shuffle=False):
@@ -95,183 +166,87 @@ class DeepFM(object):
 
     def model_fn(self, feat_ids, feat_vals, labels):
         """bulid f(x)"""
-        #------FM first-order------
-        with tf.variable_scope("first-order"):
-        	feat_wgts = tf.nn.embedding_lookup(wl, feat_ids) # None * F * 1
-        	fm_w = tf.reduce_sum(tf.mulitply(feat_wgts,feat_vals),1)
-
-        #------FM second-order------
-        with tf.variable_scope("second-order"):
-        	embeddings = tf.nn.embedding_lookup(wv, feat_ids) # None * F * K
-            feat_vals = tf.reshape(feat_vals, shape=[-1, FLAGS.field_size, 1])
-        	embeddings = tf.multiply(embeddings,feat_vals) #vij*xi
-        	sum_square = tf.square(tf.reduce_sum(embeddings,1))
-        	square_sum = tf.reduce_sum(tf.square(embeddings),1)
-        	fm_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
-
-        #------mlp------
-        with tf.variable_scope("deep"):
-        	deep_inputs = tf.reshape(embeddings,shape=[-1,FLAGS.field_size*FLAGS.embedding_size]) # None * (F*K)
-        	layers = map(int,FLAGS.deep_layers.split(','))
-        	for i in range(len(layers)):
-        		deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
-        						weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.l2_reg), scope='mlp%d' % i)
-            deep_out = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
-        						weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.l2_reg), scope='deep_out')
-        	#sig_wgts = tf.get_variable(name='sigmoid_weights', shape=[layers[-1]], initializer=tf.glorot_normal_initializer())
-        	#sig_bias = tf.get_variable(name='sigmoid_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-        	#deep_out = tf.nn.xw_plus_b(deep_inputs,sig_wgts,sig_bias,name='deep_out')
-
-        #------sigmoid------
-        with tf.variable_scope("deepfm"):
-        	bias = wb * tf.ones_like(self.train_labels)  # None * 1
-        	y = tf.sigmoid(bias + fm_w + fm_v + deep_out)
-
-        #------calc auc------
-    	auc = tf.contrib.metrics.streaming_auc(y,label)
-
-    	#------bulid loss------
-    	#lossL2 = tf.add_n([ tf.nn.l2_loss(v) for v in vars if 'bias' not in v.name ]) * 0.001
-    	loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=label)) + \
-                            FLAGS.l2_reg * tf.nn.l2_loss(wl) + \
-                            FLAGS.l2_reg * tf.nn.l2_loss(wv) #+ \ FLAGS.l2_reg * tf.nn.l2_loss(sig_wgts)
-
-    	#------bulid optimizer------
-    	if FLAGS.optimizer_type == 'Adam':
-            optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8).minimize(loss)
-        elif FLAGS.optimizer_type == 'Adagrad':
-            optimizer = tf.train.AdagradOptimizer(learning_rate=FLAGS.learning_rate, initial_accumulator_value=1e-8).minimize(loss)
-        elif FLAGS.optimizer_type == 'Momentum':
-            optimizer = tf.train.MomentumOptimizer(learning_rate=FLAGS.learning_rate, momentum=0.95).minimize(loss)
-        elif FLAGS.optimizer_type == 'ftrl':
-            optimizer = tf.train.FtrlOptimizer(FLAGS.learning_rate).minimize(loss)
-
-        #return loss, auc, optimizer
+        pass
 
     def train():
         tr_begin = time()
-	    iterator = input_fn(FLAGS.tr_dir, True, FLAGS.batch_size, FLAGS.epochs)
+	    #self.iterator = input_fn(FLAGS.tr_dir, FLAGS.batch_size, FLAGS.epochs, True)
   	    while True:
-    	try:
-			batch_ids, batch_vals, batch_labels = iterator.get_next()
-            loss = model_fn(batch_ids, batch_vals, batch_labels)
-            #feature to map to id
-			feed_dict = {feat_ids: batch_ids.eval(), feat_vals: batch_vals.eval(), labels: batch_labels}
-        	loss, auc = sess.run((loss, auc), feed_dict=feed_dict)
-      		print("global_steps=%d	tr_loss=%lf	tr_auc=%lf".format(tf.global_steps, loss, auc))
+            try:
+                self.feat_ids, self.feat_vals, self.labels = self.iterator.get_next()
+			    #feed_dict = {feat_ids: batch_ids.eval(), feat_vals: batch_vals.eval(), labels: batch_labels}
+        	    loss, auc, _ = sess.run([self.loss, self.auc, self.optimizer])
+                print("global_steps=%d	tr_loss=%lf	tr_auc=%lf".format(tf.global_steps, loss, auc))
 
-			if tf.global_steps % 10000 == 0:
-				va_loss, va_auc = evaluate()
+			    if tf.global_steps % FLAGS.eval_steps == 0:
+                    va_loss, va_auc = evaluate()
 				print("global_steps=%d	va_loss=%lf	va_auc=%lf".format(tf.global_steps, va_loss, va_auc))
-    	except tf.errors.OutOfRangeError:
-      		break
+    	    except tf.errors.OutOfRangeError:
+                break
+
+        print("Training task time elapsed = %lf".format(time() - tr_begin)
+
+        #Infer task
+        self.infer()
 
     def evaluate(self):
-        pass
+        #tr_begin = time()
+	    iterator = input_fn(FLAGS.va_dir, FLAGS.batch_size)
+        va_loss = []
+        va_auc = []
+  	    while True:
+            try:
+                self.feat_ids, self.feat_vals, self.labels = iterator.get_next()
+                #feed_dict = {feat_ids: batch_ids.eval(), feat_vals: batch_vals.eval(), labels: batch_labels}
+        	    loss, auc, _ = sess.run([self.loss, self.auc])
+                va_loss.extend(loss)
+                va_auc.extend(auc)
+    	    except tf.errors.OutOfRangeError:
+                break
+
+        return np.mean(va_loss), np.mean(va_auc)
 
     def infer(self):
+        tr_begin = time()
+	    iterator = input_fn(FLAGS.va_dir, FLAGS.batch_size)
+        with open(FLAGS.pred_file, "w") as fo:
+  	         while True:
+                 try:
+                     self.feat_ids, self.feat_vals, self.labels = iterator.get_next()
+                     #feed_dict = {feat_ids: batch_ids.eval(), feat_vals: batch_vals.eval(), labels: batch_labels}
+                     y = sess.run([self.y])
+                     fo.write("%f\n" % (y))
+    	         except tf.errors.OutOfRangeError:
+                     break
+
+        print("Infering task time elapsed = %lf".format(time() - tr_begin)
+
+    def export_model():
         pass
 
+    def load_model():
+        pass
 
-'''
-Init a tensorflow Graph containing: input data, variables, model, loss, optimizer
-'''
-graph = tf.Graph()
-sess = tf.Session()
-with graph.as_default():
-	#------bulid feature------
-
-	feat_ids  = tf.placeholder(tf.int32,shape=[None,None],name='feat_ids') #batch_size*F
-	feat_vals = tf.placeholder(tf.float32,shape=[None,None],name='feat_vals')
-	label = tf.placeholder(tf.float32, shape=[None,1], name='label')  # None * 1
-
-	#------model weights------
-	wb = tf.get_variable(name='fm_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-	wl = tf.get_variable(name='fm_w', shape=[FLAGS.feature_size], initializer=tf.glorot_normal_initializer())
-	wv = tf.get_variable(name='fm_v', shape=[FLAGS.feature_size,FLAGS.embedding_size], initializer=tf.glorot_normal_initializer())
-
-	#------bulid f(x)------
-	with tf.variable_scope("first-order"):
-		feat_wgts = tf.nn.embedding_lookup(wl, feat_ids) # None * F * 1
-		fm_w = tf.reduce_sum(tf.mulitply(feat_wgts,feat_vals),1)
-
-	with tf.variable_scope("second-order"):
-		embeddings = tf.nn.embedding_lookup(wv, feat_ids) # None * F * K
-        feat_vals = tf.reshape(feat_vals, shape=[-1, FLAGS.field_size, 1])
-		embeddings = tf.multiply(embeddings,feat_vals) #vij*xi
-		sum_square = tf.square(tf.reduce_sum(embeddings,1))
-		square_sum = tf.reduce_sum(tf.square(embeddings),1)
-		fm_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
-
-	with tf.variable_scope("deep"):
-		deep_inputs = tf.reshape(embeddings,shape=[-1,FLAGS.field_size*FLAGS.embedding_size]) # None * (F*K)
-		layers = map(int,FLAGS.deep_layers.split(','))
-		for i in range(len(layers)):
-			deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
-							weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.l2_reg), scope='mlp%d' % i)
-		deep_out = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
-							weights_regularizer=tf.contrib.layers.l2_regularizer(FLAGS.l2_reg), scope='deep_out')
-		#sig_wgts = tf.get_variable(name='sigmoid_weights', shape=[layers[-1]], initializer=tf.glorot_normal_initializer())
-		#sig_bias = tf.get_variable(name='sigmoid_bias', shape=[1], initializer=tf.constant_initializer(0.0))
-		#deep_out = tf.nn.xw_plus_b(deep_inputs,sig_wgts,sig_bias,name='deep_out')
-
-	with tf.variable_scope("deepfm"):
-		bias = wb * tf.ones_like(self.train_labels)  # None * 1
-		y = tf.sigmoid(bias + fm_w + fm_v + deep_out)
-
-
-
-	#------summary for TensorBoard-------
-    tf.summary.scalar('tr_loss', loss)
-	tf.summary.scalar('tr_auc', auc)
-    #tf.summary.histogram('fm_w_hist', wl)
-    #tf.summary.histogram('fm_v_hist', wv)
-    #for i in range(len(layers)):
-	#	tf.summary.histogram('nn_layer'+str(idx)+'_weights', w_nn_params[idx])
-    merged_summary = tf.summary.merge_all()
-
-	#------init--------
-	init = tf.global_variables_initializer()
-    #sess = tf.Session()
-    sess.run(init)
-
-#Constants
-xgb_trees = 100
-# Column Title
-CSV_COLUMNS = [ "is_click","u_pl","u_ppvn","u_de","u_os","u_t","a_m_w","a_b_w","c_h","c_w","c_al",
-                "u_ctr","a_a_ctr","a_t_ctr","c_q_ctr","c_al_ctr","c_n_ctr","c_t_ctr","c_t_n_ctr",
-                "u_a_city_ctr","u_a_age_ctr","u_a_x_ctr","u_a_g_ctr","u_a_c_ctr","c_q_a_ctr","c_q_t_sim","c_q_adtype_ctr","c_mw_a_ctr" ]
-XGB_COLUMNS = [ 'xgbf_%d' % i for i in range(xgb_trees) ]
-CSV_COLUMNS = CSV_COLUMNS + XGB_COLUMNS
-LABEL_COLUMN = "is_click"
-
-# Columns Defaults
-CSV_COLUMN_DEFAULTS = [[0],["ADR"],["7.9"],["PHONE"],["5.1"],["0"], [""],[""],["17"],[""],["0"]]
-CSV_COLUMN_CTR_DEFAULTS = [[0.0] for i in range(17)]
-XGB_COLUMN_DEFAULTS = [[0] for i in range(xgb_trees)]
-CSV_COLUMN_DEFAULTS = CSV_COLUMN_DEFAULTS + CSV_COLUMN_CTR_DEFAULTS + XGB_COLUMN_DEFAULTS
-
-
-
-
-
-
-
-def evaluate():
-	pass
-
-def infer():
-	pass
-
-def
 if __name__ == '__main__':
-    # Data loading
+    #------check Arguments------
+    print('task_type ', FLAGS.task_type)
+    print('model_type ', FLAGS.model_type)
+    print('model_dir ', FLAGS.model_dir)
+    print('servable_model_dir ', FLAGS.servable_model_dir)
+    print('dt_dir ', FLAGS.dt_dir)
+    print('train_data ', FLAGS.data_dir)
+    print('log_dir ', FLAGS.log_dir)
+    print('train_epochs ', FLAGS.train_epochs)
+    print('embedding_size ', FLAGS.embedding_size)
+    print('hidden_layer ', FLAGS.hidden_layer)
+    print('batch_size ', FLAGS.batch_size)
 
-	iBegin=time()
+    deep_fm = DeepFM()
+	iBegin = time()
 	if FLAGS.task_type == 'train':
-		train()
-	elif FLAGS.task_type == 'train':
-		evaluate()
-	elif FLAGS.task_type == 'train':
-		predict()
-	print("time elapsed: ", time()-iBegin)
+		deep_fm.train()
+	elif FLAGS.task_type == 'eval':
+		deep_fm.eval()
+	elif FLAGS.task_type == 'infer':
+		deep_fm.infer()
+	print("Time elapsed: ", time()-iBegin)
