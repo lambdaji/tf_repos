@@ -2,6 +2,16 @@
 """
 Preprocess Criteo dataset. This dataset was used for the Display Advertising
 Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).
+The original dataset is know as Criteo 1TB click log, in which the CriteoLab has collected 30 days of masked data. We only know there are 13 numerical and 26 categorical features, and there is no feature description released. Thus we name thease features as num_0 ... num_12, and cat_0 ..., cat_25.
+-For numerical features, @tianyao chen discretized them by equal-size buckets, referring APEXDatasets.
+-For categorical features, he removed long-tailed data appearing less than 20 times.
+-Nagetive sown sampling is used, and the resulting positive sample ratio is about 0.5.
+After one-hot encoding, the feature space approximates 1M.
+
+
+TODO：
+#1 连续特征 异常值/离散化/归一化
+#2 离散特征 log tail低频特征
 """
 import os
 import sys
