@@ -10,14 +10,16 @@ After one-hot encoding, the feature space approximates 1M.
 
 
 TODO：
-#1 连续特征 异常值/离散化/归一化
+#1 连续特征 异常值/归一化/离散化
 #2 离散特征 log tail低频特征
 """
 import os
 import sys
-import click
+#import click
 import random
 import collections
+import argparse
+from multiprocessing import Pool as ThreadPool
 
 # There are 13 integer features and 26 categorical features
 continous_features = range(1, 14)
@@ -47,8 +49,7 @@ class CategoryDictGenerator:
                     if features[categorial_features[i]] != '':
                         self.dicts[i][features[categorial_features[i]]] += 1
         for i in range(0, self.num_feature):
-            self.dicts[i] = filter(lambda x: x[1] >= cutoff,
-                                   self.dicts[i].items())
+            self.dicts[i] = filter(lambda x: x[1] >= cutoff, self.dicts[i].items())
             self.dicts[i] = sorted(self.dicts[i], key=lambda x: (-x[1], x[0]))
             vocabs, _ = list(zip(*self.dicts[i]))
             self.dicts[i] = dict(zip(vocabs, range(1, len(vocabs) + 1)))
@@ -95,9 +96,9 @@ class ContinuousFeatureGenerator:
         return (val - self.min[idx]) / (self.max[idx] - self.min[idx])
 
 
-@click.command("preprocess")
-@click.option("--datadir", type=str, help="Path to raw criteo dataset")
-@click.option("--outdir", type=str, help="Path to save the processed data")
+#@click.command("preprocess")
+#@click.option("--datadir", type=str, help="Path to raw criteo dataset")
+#@click.option("--outdir", type=str, help="Path to save the processed data")
 def preprocess(datadir, outdir):
     """
     All the 13 integer features are normalzied to continous values and these
@@ -105,70 +106,102 @@ def preprocess(datadir, outdir):
     Each of the 26 categorical features are one-hot encoded and all the one-hot
     vectors are combined into one sparse binary vector.
     """
+    #pool = ThreadPool(FLAGS.threads) # Sets the pool size
     dists = ContinuousFeatureGenerator(len(continous_features))
-    dists.build(os.path.join(datadir, 'train.txt'), continous_features)
+    dists.build(FLAGS.input_dir + 'train.txt', continous_features)
+    #pool.apply(dists.build, args=(FLAGS.input_dir + 'train.txt', continous_features,))
 
     dicts = CategoryDictGenerator(len(categorial_features))
-    dicts.build(
-        os.path.join(datadir, 'train.txt'), categorial_features, cutoff=200)
+    dicts.build(FLAGS.input_dir + 'train.txt', categorial_features, cutoff=FLAGS.cutoff)
+    #pool.apply(dicts.build, args=(FLAGS.input_dir + 'train.txt', categorial_features,))
 
+    #pool.close()
+    #pool.join()
+
+    output = open(FLAGS.output_dir + 'feature_map','w')
+    for i in continous_features:
+        output.write("{0} {1}\n".format('I'+str(i), i))
     dict_sizes = dicts.dicts_sizes()
-    categorial_feature_offset = [0]
-    for i in range(1, len(categorial_features)):
+    categorial_feature_offset = [dists.num_feature]
+    for i in range(1, len(categorial_features)+1):
         offset = categorial_feature_offset[i - 1] + dict_sizes[i - 1]
         categorial_feature_offset.append(offset)
+        for key, val in dicts.dicts[i-1].iteritems():
+            output.write("{0} {1}\n".format('C'+str(i)+'|'+key, categorial_feature_offset[i - 1]+val+1))
 
     random.seed(0)
 
     # 90% of the data are used for training, and 10% of the data are used
     # for validation.
-    with open(os.path.join(outdir, 'train.txt'), 'w') as out_train:
-        with open(os.path.join(outdir, 'valid.txt'), 'w') as out_valid:
-            with open(os.path.join(datadir, 'train.txt'), 'r') as f:
+    with open(FLAGS.output_dir + 'tr.libsvm', 'w') as out_train:
+        with open(FLAGS.output_dir + 'va.libsvm', 'w') as out_valid:
+            with open(FLAGS.input_dir + 'train.txt', 'r') as f:
                 for line in f:
                     features = line.rstrip('\n').split('\t')
 
-                    continous_vals = []
+                    feat_vals = []
                     for i in range(0, len(continous_features)):
                         val = dists.gen(i, features[continous_features[i]])
-                        continous_vals.append("{0:.6f}".format(val).rstrip('0')
-                                              .rstrip('.'))
-                    categorial_vals = []
-                    for i in range(0, len(categorial_features)):
-                        val = dicts.gen(i, features[categorial_features[
-                            i]]) + categorial_feature_offset[i]
-                        categorial_vals.append(str(val))
+                        feat_vals.append(str(continous_features[i]) + ':' + "{0:.6f}".format(val).rstrip('0').rstrip('.'))
 
-                    continous_vals = ','.join(continous_vals)
-                    categorial_vals = ','.join(categorial_vals)
+                    for i in range(0, len(categorial_features)):
+                        val = dicts.gen(i, features[categorial_features[i]]) + categorial_feature_offset[i]
+                        feat_vals.append(str(val) + ':1')
+
                     label = features[0]
                     if random.randint(0, 9999) % 10 != 0:
-                        out_train.write('\t'.join(
-                            [continous_vals, categorial_vals, label]) + '\n')
+                        out_train.write("{0} {1}\n".format(label, ' '.join(feat_vals)))
                     else:
-                        out_valid.write('\t'.join(
-                            [continous_vals, categorial_vals, label]) + '\n')
+                        out_valid.write("{0} {1}\n".format(label, ' '.join(feat_vals)))
 
-    with open(os.path.join(outdir, 'test.txt'), 'w') as out:
-        with open(os.path.join(datadir, 'test.txt'), 'r') as f:
+    with open(FLAGS.output_dir + 'te.libsvm', 'w') as out:
+        with open(FLAGS.input_dir + 'test.txt', 'r') as f:
             for line in f:
                 features = line.rstrip('\n').split('\t')
 
-                continous_vals = []
+                feat_vals = []
                 for i in range(0, len(continous_features)):
                     val = dists.gen(i, features[continous_features[i] - 1])
-                    continous_vals.append("{0:.6f}".format(val).rstrip('0')
-                                          .rstrip('.'))
-                categorial_vals = []
-                for i in range(0, len(categorial_features)):
-                    val = dicts.gen(i, features[categorial_features[
-                        i] - 1]) + categorial_feature_offset[i]
-                    categorial_vals.append(str(val))
+                    feat_vals.append(str(continous_features[i]) + ':' + "{0:.6f}".format(val).rstrip('0').rstrip('.'))
 
-                continous_vals = ','.join(continous_vals)
-                categorial_vals = ','.join(categorial_vals)
-                out.write('\t'.join([continous_vals, categorial_vals]) + '\n')
+                for i in range(0, len(categorial_features)):
+                    val = dicts.gen(i, features[categorial_features[i] - 1]) + categorial_feature_offset[i]
+                    feat_vals.append(str(val) + ':1')
+
+                out.write("{0} {1}\n".format(label, ' '.join(feat_vals)))
 
 
 if __name__ == "__main__":
-    preprocess()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=2,
+        help="threads num"
+        )
+    parser.add_argument(
+        "--input_dir",
+        type=str,
+        default="",
+        help="input data dir"
+        )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="",
+        help="feature map output dir"
+        )
+    parser.add_argument(
+        "--cutoff",
+        type=int,
+        default=200,
+        help="cutoff long-tailed categorical values"
+        )
+
+    FLAGS, unparsed = parser.parse_known_args()
+    print('threads ', FLAGS.threads)
+    print('input_dir ', FLAGS.input_dir)
+    print('output_dir ', FLAGS.output_dir)
+    print('cutoff ', FLAGS.cutoff)
+
+    preprocess(FLAGS.input_dir, FLAGS.output_dir)
