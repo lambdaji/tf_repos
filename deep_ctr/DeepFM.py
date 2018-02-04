@@ -2,9 +2,11 @@
 #coding=utf-8
 """
 #1 Input pipline using Dataset high level API, Support parallel and prefetch reading
-#2 Train pipline using Coustom Estimator
-#3 Support distincted training by TF_CONFIG
+#2 Train pipline using Coustom Estimator by rewriting model_fn
+#3 Support distincted training using TF_CONFIG
+#4 Support export_model for TensorFlow Serving
 
+方便迁移到其他算法上，只要修改input_fn and model_fn
 by lambdaji
 """
 #from __future__ import absolute_import
@@ -105,7 +107,7 @@ def model_fn(features, labels, mode, params):
     #------bulid weights------
     FM_B = tf.get_variable(name='fm_bias', shape=[1], initializer=tf.constant_initializer(0.0))
     FM_W = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
-    FM_V = tf.get_variable(name='fm_v', shape=[feature_size,embedding_size], initializer=tf.glorot_normal_initializer())
+    FM_V = tf.get_variable(name='fm_v', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
 
     #------build feaure-------
     feat_ids  = features['feat_ids']
@@ -114,11 +116,11 @@ def model_fn(features, labels, mode, params):
     feat_vals = tf.reshape(feat_vals,shape=[-1,field_size])
 
     #------build f(x)------
-    with tf.variable_scope("first-order"):
+    with tf.variable_scope("First-order"):
         feat_wgts = tf.nn.embedding_lookup(FM_W, feat_ids) # None * F * 1
         y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
 
-    with tf.variable_scope("second-order"):
+    with tf.variable_scope("Second-order"):
         embeddings = tf.nn.embedding_lookup(FM_V, feat_ids) # None * F * K
         feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
         embeddings = tf.multiply(embeddings, feat_vals) #vij*xi
@@ -126,7 +128,7 @@ def model_fn(features, labels, mode, params):
         square_sum = tf.reduce_sum(tf.square(embeddings),1)
         y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
 
-    with tf.variable_scope("deep"):
+    with tf.variable_scope("Deep-part"):
         deep_inputs = tf.reshape(embeddings,shape=[-1,field_size*embedding_size]) # None * (F*K)
         for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
@@ -139,8 +141,8 @@ def model_fn(features, labels, mode, params):
         #sig_bias = tf.get_variable(name='sigmoid_bias', shape=[1], initializer=tf.constant_initializer(0.0))
         #deep_out = tf.nn.xw_plus_b(deep_inputs,sig_wgts,sig_bias,name='deep_out')
 
-    with tf.variable_scope("deepfm"):
-        #y_bias = FM_B * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label是不传
+    with tf.variable_scope("DeepFM-out"):
+        #y_bias = FM_B * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label时不传
         y_bias = FM_B * tf.ones_like(y_d, dtype=tf.float32)     # None * 1
         y = y_bias + y_w + y_v + y_d
         pred = tf.sigmoid(y)
