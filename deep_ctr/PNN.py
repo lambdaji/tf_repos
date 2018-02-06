@@ -17,6 +17,7 @@ by lambdaji
 import shutil
 #import sys
 import os
+import json
 import glob
 from datetime import date, timedelta
 from time import time
@@ -48,6 +49,9 @@ tf.app.flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
 tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, GD, Momentum}")
 tf.app.flags.DEFINE_string("deep_layers", '256,128,64', "deep layers")
+tf.app.flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
+tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normaization (True or False)")
+tf.app.flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(recommend trying decay=0.9)")
 tf.app.flags.DEFINE_string("data_dir", '', "data dir")
 tf.app.flags.DEFINE_string("dt_dir", '', "data dt partition")
 tf.app.flags.DEFINE_string("model_dir", '', "model check point dir")
@@ -104,13 +108,14 @@ def model_fn(features, labels, mode, params):
     learning_rate = params["learning_rate"]
     #optimizer = params["optimizer"]
     layers = map(int, params["deep_layers"].split(','))
-	num_pairs = field_size * (field_size - 1) / 2
+    dropout = map(float, params["dropout"].split(','))
+    num_pairs = field_size * (field_size - 1) / 2
 
     #------bulid weights------
     Global_Bias = tf.get_variable(name='bias', shape=[1], initializer=tf.constant_initializer(0.0))
     Feat_Bias = tf.get_variable(name='linear', shape=[feature_size], initializer=tf.glorot_normal_initializer())
     Feat_Emb = tf.get_variable(name='emb', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
-	Prod_Kernel = tf.get_variable(name='kernel', shape=[embedding_size, num_pairs, embedding_size], initializer=tf.glorot_normal_initializer())
+    #Prod_Kernel = tf.get_variable(name='kernel', shape=[embedding_size, num_pairs, embedding_size], initializer=tf.glorot_normal_initializer())
 
 
     #------build feaure-------
@@ -131,44 +136,51 @@ def model_fn(features, labels, mode, params):
 
     with tf.variable_scope("Product-layer"):
 		if FLAGS.model_type == 'FNN':
-			deep_inputs = embeddings
+			deep_inputs = tf.reshape(embeddings,shape=[-1,field_size*embedding_size])
 		elif FLAGS.model_type == 'Inner':
 			row = []
-            col = []
-            for i in range(field_size-1):
-                for j in range(i+1, field_size):
-                    row.append(i)
-                    col.append(j)
+			col = []
+			for i in range(field_size-1):
+				for j in range(i+1, field_size):
+					row.append(i)
+					col.append(j)
 			p = tf.gather(embeddings, row, axis=1)
 			q = tf.gather(embeddings, col, axis=1)
 	        #p = tf.reshape(p, [-1, num_pairs, embedding_size])
             #q = tf.reshape(q, [-1, num_pairs, embedding_size])
-            inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])	# None * (F*(F-1)/2)
+			inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])										# None * (F*(F-1)/2)
 			deep_inputs = tf.concat([tf.reshape(embeddings,shape=[-1,field_size*embedding_size]), inner], 1)	# None * ( F*K+F*(F-1)/2 )
 		elif FLAGS.model_type == 'Outer':
 			row = []
-            col = []
-            for i in range(field_size-1):
-                for j in range(i+1, field_size):
-                    row.append(i)
-                    col.append(j)
+			col = []
+			for i in range(field_size-1):
+				for j in range(i+1, field_size):
+					row.append(i)
+					col.append(j)
 			p = tf.gather(embeddings, row, axis=1)
 			q = tf.gather(embeddings, col, axis=1)
 	        #p = tf.reshape(p, [-1, num_pairs, embedding_size])
             #q = tf.reshape(q, [-1, num_pairs, embedding_size])
-			p_x_k = tf.reduce_sum(
-                            # batch * k * pair * k
-                            tf.multiply(p, Prod_Kernel),
-                            -1)
 			#einsum('i,j->ij', p, q)  # output[i,j] = p[i]*q[j]				# Outer product
-            outer = tf.reshape(tf.einsum('i,j->ij', p, q), [-1, num_pairs])	# None * (F*(F-1)/2*K*K)
+			outer = tf.reshape(tf.einsum('i,j->ij', p, q), [-1, num_pairs])	# None * (F*(F-1)/2*K*K)
 			deep_inputs = tf.concat([tf.reshape(embeddings,shape=[-1,field_size*embedding_size]), outer], 1)	# None * ( F*K+F*(F-1)/2*K*K )
 
 
     with tf.variable_scope("Deep-part"):
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            train_phase = True
+        else:
+            train_phase = False
+
         for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
+            	weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
+
+            if FLAGS.batch_norm:
+				deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' %i)   	#放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
+            if mode == tf.estimator.ModeKeys.TRAIN:
+				deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])                              	#Apply Dropout after all BN layers and set dropout=0.8(drop_ratio=0.2)
+            	#deep_inputs = tf.layers.dropout(inputs=deep_inputs, rate=dropout[i], training=mode == tf.estimator.ModeKeys.TRAIN)
 
         y_deep = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
             weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
@@ -231,6 +243,12 @@ def model_fn(features, labels, mode, params):
     #        train_op=train_op,
     #        predictions={"prob": pred},
     #        eval_metric_ops=eval_metric_ops)
+
+def batch_norm_layer(x, train_phase, scope_bn):
+    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
+    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
+    z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
+    return z
 
 def set_dist_env():
     if FLAGS.dist_mode == 1:        # 本地分布式测试模式1 chief, 1 ps, 1 evaluator
@@ -304,8 +322,9 @@ def main(_):
         "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg": FLAGS.l2_reg,
-        "deep_layers": FLAGS.deep_layers
-		"model_type": FLAGS.model_type
+        "deep_layers": FLAGS.deep_layers,
+		"model_type": FLAGS.model_type,
+		"dropout": FLAGS.dropout
     }
     config = tf.estimator.RunConfig().replace(session_config = tf.ConfigProto(device_count={'GPU':0, 'CPU':FLAGS.num_threads}),
             log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
@@ -344,7 +363,7 @@ if __name__ == "__main__":
     #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
 
     print('task_type ', FLAGS.task_type)
-	print('model_type ', FLAGS.model_type)
+    print('model_type ', FLAGS.model_type)
     print('model_dir ', FLAGS.model_dir)
     print('data_dir ', FLAGS.data_dir)
     print('dt_dir ', FLAGS.dt_dir)
@@ -354,6 +373,7 @@ if __name__ == "__main__":
     print('embedding_size ', FLAGS.embedding_size)
     print('batch_size ', FLAGS.batch_size)
     print('deep_layers ', FLAGS.deep_layers)
+    print('dropout ', FLAGS.dropout)
     print('loss_type ', FLAGS.loss_type)
     print('optimizer ', FLAGS.optimizer)
     print('learning_rate ', FLAGS.learning_rate)

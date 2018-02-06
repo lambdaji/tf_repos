@@ -18,6 +18,7 @@ by lambdaji
 import shutil
 #import sys
 import os
+import json
 import glob
 from datetime import date, timedelta
 from time import time
@@ -37,18 +38,19 @@ tf.app.flags.DEFINE_string("ps_hosts", '', "Comma-separated list of hostname:por
 tf.app.flags.DEFINE_string("worker_hosts", '', "Comma-separated list of hostname:port pairs")
 tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
-tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
+tf.app.flags.DEFINE_integer("num_threads", 10, "Number of threads")
 tf.app.flags.DEFINE_integer("feature_size", 0, "Number of features")
 tf.app.flags.DEFINE_integer("field_size", 0, "Number of fields")
-tf.app.flags.DEFINE_integer("embedding_size", 16, "Embedding size")
+tf.app.flags.DEFINE_integer("embedding_size", 256, "Embedding size")
 tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
-tf.app.flags.DEFINE_integer("batch_size", 64, "Number of batch size")
+tf.app.flags.DEFINE_integer("batch_size", 128, "Number of batch size")
 tf.app.flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
-tf.app.flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
-tf.app.flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
+tf.app.flags.DEFINE_float("learning_rate", 0.1, "learning rate")
+tf.app.flags.DEFINE_float("l2_reg", 1.0, "L2 regularization")
 tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
-tf.app.flags.DEFINE_string("optimizer", 'AdaF, "optimizer type {Adam, Adagrad, GD, Momentum}")
-tf.app.flags.DEFINE_string("attention_layers", '64', "Attention Net mlp layers")
+tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, GD, Momentum}")
+tf.app.flags.DEFINE_string("attention_layers", '256', "Attention Net mlp layers")
+tf.app.flags.DEFINE_string("dropout", '1.0,0.5', "dropout rate")
 tf.app.flags.DEFINE_string("data_dir", '', "data dir")
 tf.app.flags.DEFINE_string("dt_dir", '', "data dt partition")
 tf.app.flags.DEFINE_string("model_dir", '', "model check point dir")
@@ -104,6 +106,7 @@ def model_fn(features, labels, mode, params):
     learning_rate = params["learning_rate"]
     #optimizer = params["optimizer"]
     layers = map(int, params["attention_layers"].split(','))
+    dropout = map(float, params["dropout"].split(','))
 
     #------bulid weights------
     Global_Bias = tf.get_variable(name='bias', shape=[1], initializer=tf.constant_initializer(0.0))
@@ -121,16 +124,16 @@ def model_fn(features, labels, mode, params):
         feat_wgts = tf.nn.embedding_lookup(Feat_Bias, feat_ids) # None * F * 1
         y_linear = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
 
-    with tf.variable_scope("Pair-wise Interaction Layer"):
-        embeddings = tf.nn.embedding_lookup(FM_V, feat_ids) # None * F * K
+    with tf.variable_scope("Pairwise-Interaction-Layer"):
+        embeddings = tf.nn.embedding_lookup(Feat_Emb, feat_ids) # None * F * K
         feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
         embeddings = tf.multiply(embeddings, feat_vals) #vij*xi
 
-		num_interactions = field_size*(field_size-1)/2
-		element_wise_product_list = []
-		for i in range(0, field_size):
-			for j in range(i+1, field_size):
-				element_wise_product_list.append(tf.multiply(embeddings[:,i,:], embeddings[:,j,:]))
+        num_interactions = field_size*(field_size-1)/2
+        element_wise_product_list = []
+        for i in range(0, field_size):
+            for j in range(i+1, field_size):
+                element_wise_product_list.append(tf.multiply(embeddings[:,i,:], embeddings[:,j,:]))
         element_wise_product = tf.stack(element_wise_product_list) 								# (F*(F-1)) * None * K
         element_wise_product = tf.transpose(element_wise_product, perm=[1,0,2]) 				# None * (F*(F-1)) * K
         #interactions = tf.reduce_sum(element_wise_product, 2, name="interactions")
@@ -139,23 +142,29 @@ def model_fn(features, labels, mode, params):
         deep_inputs = tf.reshape(element_wise_product, shape=[-1, embedding_size]) 				# (None * (F*(F-1))) * K
         for i in range(len(layers)):
             deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
 
         aij = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
             weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='attention_out')# (None * (F*(F-1))) * 1
 
         #aij_reshape = tf.reshape(aij, shape=[-1, num_interactions, 1])							# None * (F*(F-1)) * 1
-		aij_softmax = tf.nn.softmax(tf.reshape(aij, shape=[-1, num_interactions, 1]), dim=1, name='attention_soft')
+        aij_softmax = tf.nn.softmax(tf.reshape(aij, shape=[-1, num_interactions, 1]), dim=1, name='attention_soft')
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            aij_softmax = tf.nn.dropout(aij_softmax, keep_prob=dropout[0])
 
-    with tf.variable_scope("Attention-based Pooling"):
+    with tf.variable_scope("Attention-based-Pooling"):
         y_emb = tf.reduce_sum(tf.multiply(aij_softmax, element_wise_product), 1) 				# None * K
-		y_d = tf.contrib.layers.fully_connected(inputs=y_emb, num_outputs=1, activation_fn=tf.identity, \
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            y_emb = tf.nn.dropout(y_emb, keep_prob=dropout[1])
+
+        y_d = tf.contrib.layers.fully_connected(inputs=y_emb, num_outputs=1, activation_fn=tf.identity, \
             weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')		# None * 1
+        y_deep = tf.reshape(y_d,shape=[-1])
 
     with tf.variable_scope("AFM-out"):
         #y_bias = Global_Bias * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label时不传
-        y_bias = Global_Bias * tf.ones_like(y_d, dtype=tf.float32)      # None * 1
-        y = y_bias + y_linear + y_d
+        y_bias = Global_Bias * tf.ones_like(y_deep, dtype=tf.float32)   # None * 1
+        y = y_bias + y_linear + y_deep
         pred = tf.sigmoid(y)
 
     predictions={"prob": pred}
@@ -183,11 +192,11 @@ def model_fn(features, labels, mode, params):
                 eval_metric_ops=eval_metric_ops)
 
     #------bulid optimizer------
-    if FLAGS.optimizer == 'AdaF:
+    if FLAGS.optimizer == 'Adam':
         optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8)
     elif FLAGS.optimizer == 'Adagrad':
         optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=1e-8)
-    elif FLAGS.optimizer == 'MomentuF:
+    elif FLAGS.optimizer == 'Momentum':
         optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.95)
     elif FLAGS.optimizer == 'ftrl':
         optimizer = tf.train.FtrlOptimizer(learning_rate)
@@ -282,7 +291,8 @@ def main(_):
         "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
         "l2_reg": FLAGS.l2_reg,
-        "attention_layers": FLAGS.attention_layers
+        "attention_layers": FLAGS.attention_layers,
+        "dropout": FLAGS.dropout
     }
     config = tf.estimator.RunConfig().replace(session_config = tf.ConfigProto(device_count={'GPU':0, 'CPU':FLAGS.num_threads}),
             log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)
@@ -329,7 +339,8 @@ if __name__ == "__main__":
     print('field_size ', FLAGS.field_size)
     print('embedding_size ', FLAGS.embedding_size)
     print('batch_size ', FLAGS.batch_size)
-    print('deep_layers ', FLAGS.deep_layers)
+    print('attention_layers ', FLAGS.attention_layers)
+    print('dropout ', FLAGS.dropout)
     print('loss_type ', FLAGS.loss_type)
     print('optimizer ', FLAGS.optimizer)
     print('learning_rate ', FLAGS.learning_rate)
