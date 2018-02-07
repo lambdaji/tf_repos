@@ -94,11 +94,11 @@ def build_feature():
     #2 { categorical base columns }
     deep_dbc = [tf.feature_column.categorical_column_with_identity(key=colname, num_buckets=10000, default_value=0) for colname in D_COLUMNS]
 
-    #3 { context feture }
+    #3 { embedding columns }
     deep_emb = [tf.feature_column.embedding_column(c, dimension=FLAGS.embedding_size) for c in deep_dbc]
 
     #3 { wide columns and deep columns }
-    wide_columns = deep_dbc
+    wide_columns = deep_cbc + deep_dbc
     deep_columns = deep_cbc + deep_emb
 
     return wide_columns, deep_columns

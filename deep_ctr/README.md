@@ -1,4 +1,4 @@
-# TensorFlow Estimator Implementation of wide_n_deep/DeepFM/NFM/AFM/FNN/PNN
+# TensorFlow Coustom Estimator Implementation of DeepFM/wide_n_deep/NFM/AFM/FNN/PNN 
 
 ``Note``: Any problems, you can contact me at kevinqu@apex.sjtu.edu.cn, or kevinqu16@gmail.com. Through email, you will get my rapid response.
 
