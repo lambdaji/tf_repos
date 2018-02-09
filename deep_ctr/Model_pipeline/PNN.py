@@ -150,7 +150,7 @@ def model_fn(features, labels, mode, params):
             #q = tf.reshape(q, [-1, num_pairs, embedding_size])
 			inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])										# None * (F*(F-1)/2)
 			deep_inputs = tf.concat([tf.reshape(embeddings,shape=[-1,field_size*embedding_size]), inner], 1)	# None * ( F*K+F*(F-1)/2 )
-		elif FLAGS.model_type == 'Outer':
+		elif FLAGS.model_type == 'Outer':             #ERROR: NOT ready yet
 			row = []
 			col = []
 			for i in range(field_size-1):
@@ -162,7 +162,7 @@ def model_fn(features, labels, mode, params):
 	        #p = tf.reshape(p, [-1, num_pairs, embedding_size])
             #q = tf.reshape(q, [-1, num_pairs, embedding_size])
 			#einsum('i,j->ij', p, q)  # output[i,j] = p[i]*q[j]				# Outer product
-			outer = tf.reshape(tf.einsum('i,j->ij', p, q), [-1, num_pairs*embedding_size*embedding_size])	    # None * (F*(F-1)/2*K*K)
+			outer = tf.reshape(tf.einsum('aik,ajk->aijk', p, q), [-1, num_pairs*embedding_size*embedding_size])	# None * (F*(F-1)/2*K*K)
 			deep_inputs = tf.concat([tf.reshape(embeddings,shape=[-1,field_size*embedding_size]), outer], 1)	# None * ( F*K+F*(F-1)/2*K*K )
 
 
