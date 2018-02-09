@@ -1,19 +1,22 @@
-# TensorFlow Estimator Implementation of DeepFM/wide_n_deep/NFM/AFM/FNN/PNN
+# TensorFlow Estimator of DeepFM/wide_n_deep/NFM/AFM/FNN/PNN
 
-This repository contains the demo code of DeepFM/wide_n_deep/NFM/AFM/FNN/PNN with the fellowing features：
+This repository contains the demo estimator of DeepFM/wide_n_deep/NFM/AFM/FNN/PNN with the fellowing features：
 * Input pipline using Dataset high level API, support parallel and prefetch reading
 * Train pipline using Coustom Estimator by rewriting model_fn
 * Support distincted training by TF_CONFIG and multi-threads
 * Support export model for TensorFlow Serving
 
+[我的知乎](https://zhuanlan.zhihu.com/p/33699909)
+
 
 # Environments
 * Tensorflow (version: 1.4)
 
-
+   
 # How to use
+feature --> model --> serving   
 
-## feature pipline
+## #1feature pipline
 This dataset was used for the Display Advertising Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).
 There are 13 integer features and 26 categorical features:
 -For numerical features, normalzied to continous values.
@@ -25,7 +28,8 @@ This code referenced from [here](https://github.com/PaddlePaddle/models/blob/dev
     python get_criteo_feature.py --input_dir=../../data/criteo/ --output_dir=../../data/criteo/ --cutoff=200
 
 
-## model pipline
+
+## #2model pipline
 ``train``:
 
     python DeepFM.py --task_type=train --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
@@ -35,7 +39,8 @@ This code referenced from [here](https://github.com/PaddlePaddle/models/blob/dev
     python DeepFM.py --task_type=infer --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
 
 
-## tf serving pipline
+
+## #3tf serving pipline
 Serving a TensorFlow Estimator model in C++ by TF-Serving. This tutorial consists of two parts:
 ### Exporting model using ``export_savedmodel()``:
 
@@ -48,6 +53,7 @@ Serving a TensorFlow Estimator model in C++ by TF-Serving. This tutorial consist
     |--variables
       |--variables.data-00000-of-00001
       |--variables.index
+
 
 ### TF-Serving:   
 Creating a client for the model(Input and Output must be matched with ``serving_input_receiver_fn``) and serving it.   

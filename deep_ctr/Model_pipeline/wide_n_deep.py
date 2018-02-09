@@ -33,6 +33,7 @@ tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 tf.app.flags.DEFINE_integer("batch_size", 128, "batch size")
 tf.app.flags.DEFINE_string("deep_layers", '256,128,64', "deep layers")
 tf.app.flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
+tf.app.flags.DEFINE_integer("throttle_secs", 600, "evaluate every 10mins")
 #tf.app.flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
 #tf.app.flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
 #tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
@@ -190,9 +191,9 @@ def main(_):
         train_spec = tf.estimator.TrainSpec(input_fn=lambda: input_fn(tr_files, num_epochs=FLAGS.num_epochs, batch_size=FLAGS.batch_size))
         eval_spec = tf.estimator.EvalSpec(input_fn=lambda: input_fn(va_files, num_epochs=1, batch_size=FLAGS.batch_size),
                 #exporters = lastest_exporter,
-                steps = None,               # evaluate the whole eval file
-                start_delay_secs=3000,
-                throttle_secs=1800)         # evaluate every half hour
+                steps = None,                           # evaluate the whole eval file
+                start_delay_secs=1800,
+                throttle_secs=FLAGS.throttle_secs)      # evaluate every 10min for wide
         tf.estimator.train_and_evaluate(wide_n_deep, train_spec, eval_spec)
     elif FLAGS.task_type == "predict":
         pred = wide_n_deep.predict(input_fn=lambda: input_fn(te_files, num_epochs=1, batch_size=FLAGS.batch_size), predict_keys="probabilities")
