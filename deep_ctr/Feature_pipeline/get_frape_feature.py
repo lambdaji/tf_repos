@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 """
-bml to csv
+label map to {0, 1}
 """
 import sys
 reload(sys)
