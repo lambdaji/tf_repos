@@ -20,14 +20,16 @@ After one-hot encoding, the feature space is 117581. Nagetive down sampling will
 
 This code referenced from [here](https://github.com/PaddlePaddle/models/blob/develop/deep_fm/preprocess.py)
 
-  python get_criteo_feature.py --input_dir=../../data/criteo/ --output_dir=../../data/criteo/ --cutoff=200
+    python get_criteo_feature.py --input_dir=../../data/criteo/ --output_dir=../../data/criteo/ --cutoff=200
 
 ### model pipline
 ``train``:
-  python DeepFM.py --task_type=train --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
+
+    python DeepFM.py --task_type=train --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
 
 ``infer``:
-  python DeepFM.py --task_type=infer --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
+
+    python DeepFM.py --task_type=infer --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
 
 ### tf serving pipline
 Serving a TensorFlow Estimator model in C++ by TF-Serving. This tutorial consists of two parts:
@@ -35,16 +37,18 @@ Serving a TensorFlow Estimator model in C++ by TF-Serving. This tutorial consist
 * Creating a client for the model(Input and Output must be matched with ``serving_input_receiver_fn``) and serving it.
 
 ``export``:
-  python DeepFM.py --task_type=export --learning_rate=0.0005 --optimizer=Adam --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --servable_model_dir=./servable_model/
+
+    python DeepFM.py --task_type=export --learning_rate=0.0005 --optimizer=Adam --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --servable_model_dir=./servable_model/
 
 ``servable_model_dir`` will contain the following files:
->saved_model.pb
->variables
->>variables.data-00000-of-00001
->>variables.index
+    $ ls -lh servable_model/1517971230
+    |--saved_model.pb
+    |--variables
+      |--variables.data-00000-of-00001
+      |--variables.index
 
 ``TF-Serving``:
-Please refer the ``Serving_pipline`` folder.
+  Please refer the ``Serving_pipline`` folder.
 
 You'd better take a look at the following proto file first in:
 * tensorflow/core/example/example.proto
