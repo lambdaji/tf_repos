@@ -12,16 +12,16 @@ This repository contains the demo estimator of DeepFM/wide_n_deep/NFM/AFM/FNN/PN
 # Environments
 * Tensorflow (version: 1.4)
 
-   
+
 # How to use
 feature --> model --> serving   
 
 ## #1feature pipline
-This dataset was used for the Display Advertising Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).
-There are 13 integer features and 26 categorical features:
--For numerical features, normalzied to continous values.
--For categorical features, removed long-tailed data appearing less than 200 times.
-After one-hot encoding, the feature space is 117581. Nagetive down sampling will be tryed later.
+This dataset was used for the Display Advertising Challenge (https://www.kaggle.com/c/criteo-display-ad-challenge).   
+There are 13 integer features and 26 categorical features:   
+-For numerical features, normalzied to continous values.   
+-For categorical features, removed long-tailed data appearing less than 200 times.   
+After one-hot encoding, the feature space is 117581.
 
 This code referenced from [here](https://github.com/PaddlePaddle/models/blob/develop/deep_fm/preprocess.py)
 
@@ -42,7 +42,7 @@ This code referenced from [here](https://github.com/PaddlePaddle/models/blob/dev
 
 ## #3tf serving pipline
 Serving a TensorFlow Estimator model in C++ by TF-Serving. This tutorial consists of two parts:
-### Exporting model using ``export_savedmodel()``:
+#### Exporting model using ``export_savedmodel()``:
 
     python DeepFM.py --task_type=export --learning_rate=0.0005 --optimizer=Adam --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --servable_model_dir=./servable_model/
 
@@ -55,7 +55,7 @@ Serving a TensorFlow Estimator model in C++ by TF-Serving. This tutorial consist
       |--variables.index
 
 
-### TF-Serving:   
+#### TF-Serving:   
 Creating a client for the model(Input and Output must be matched with ``serving_input_receiver_fn``) and serving it.   
 Please refer the ``Serving_pipline`` folder.   
 
