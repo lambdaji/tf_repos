@@ -20,6 +20,7 @@ pipline: feature → model → serving
 
 ### 特征框架 -- logs in，samples out
 实验数据集用criteo，特征工程参考[here](https://github.com/PaddlePaddle/models/blob/develop/deep_fm/preprocess.py)
+
 DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大都放在ID类特征如何做embedding上，至于连续特征如何处理很少讨论，大概有以下3种方式：
 
     --不做embedding
@@ -33,7 +34,9 @@ DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大
 
 ### 训练框架 -- samples in，model out
 用Tensorflow (version: 1.4)作为训练框架，目前实现了DeepFM/wide_n_deep/FNN/PNN/NFM/AFM等算法，除了wide_n_deep，其他算法默认参数.
+
 ![tensorboard_auc.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/tensorboard_auc.png)
+
 以DeepFM为例来看看如何使用：
 ``train``:
 
@@ -59,8 +62,10 @@ DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大
         |--variables.index
 
 然后写client发送请求，参考Serving_pipeline。
+
 wide_n_deep model线上预测性能如下：
 ![tf_serving_wdl.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/tf_serving_wdl.png)
+
 可以看到：
 
     截距部分15ms：对应解析请求包，查询DCache，转换特征格式以及打log等
