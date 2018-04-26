@@ -38,6 +38,7 @@ DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大
 ![tensorboard_auc.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/tensorboard_auc.png)
 
 以DeepFM为例来看看如何使用：
+
 ``train``:
 
     python DeepFM.py --task_type=train --learning_rate=0.0005 --optimizer=Adam --num_epochs=1 --batch_size=256 --field_size=39 --feature_size=117581 --deep_layers=400,400,400 --dropout=0.5,0.5,0.5 --log_steps=1000 --num_threads=8 --model_dir=./model_ckpt/criteo/DeepFM/ --data_dir=../../data/criteo/
@@ -64,6 +65,7 @@ DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大
 然后写client发送请求，参考Serving_pipeline。
 
 wide_n_deep model线上预测性能如下：
+
 ![tf_serving_wdl.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/tf_serving_wdl.png)
 
 可以看到：
