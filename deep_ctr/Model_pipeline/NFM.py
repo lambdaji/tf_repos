@@ -120,12 +120,12 @@ def model_fn(features, labels, mode, params):
         y_linear = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
 
     with tf.variable_scope("BiInter-part"):
-        embeddings = tf.nn.embedding_lookup(Feat_Emb, feat_ids) 			# None * F * K
+        embeddings = tf.nn.embedding_lookup(Feat_Emb, feat_ids) 		# None * F * K
         feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
         embeddings = tf.multiply(embeddings, feat_vals) 				# vij * xi
         sum_square_emb = tf.square(tf.reduce_sum(embeddings,1))
         square_sum_emb = tf.reduce_sum(tf.square(embeddings),1)
-        deep_inputs = 0.5*tf.subtract(sum_square_emb, square_sum_emb)		# None * K
+        deep_inputs = 0.5*tf.subtract(sum_square_emb, square_sum_emb)	# None * K
 
     with tf.variable_scope("Deep-part"):
         if mode == tf.estimator.ModeKeys.TRAIN:
