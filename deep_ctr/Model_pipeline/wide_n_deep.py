@@ -168,7 +168,7 @@ def set_dist_env():
             task_index -= 2
 
         tf_config = {'cluster': {'chief': chief_hosts, 'worker': worker_hosts, 'ps': ps_hosts}, 'task': {'type': job_name, 'index': task_index }}
-        LOG.info(json.dumps(tf_config))
+        print(json.dumps(tf_config))
         os.environ['TF_CONFIG'] = json.dumps(tf_config)
 
 def main(_):

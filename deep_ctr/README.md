@@ -75,11 +75,19 @@ wide_n_deep model线上预测性能如下：
 
 ### 参考资料
 [1] DeepFM: A Factorization-Machine based Neural Network for CTR Prediction
+
 [2] Wide & Deep Learning for Recommender Systems
+
 [3] Deep Learning over Multi-Field Categorical Data: A Case Study on User Response Prediction
+
 [4] Product-based Neural Networks for User Response Prediction
+
 [5] Neural Factorization Machines for Sparse Predictive Analytics
+
 [6] Attentional Factorization Machines:Learning theWeight of Feature Interactions via Attention Networks
+
 [7] https://github.com/Atomu2014/product-nets
+
 [8] https://github.com/hexiangnan/attentional_factorization_machine
+
 [9] https://github.com/hexiangnan/neural_factorization_machine
