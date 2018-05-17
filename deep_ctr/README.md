@@ -82,12 +82,16 @@ wide_n_deep model线上预测性能如下：
 
 [4] Product-based Neural Networks for User Response Prediction
 
-[5] Neural Factorization Machines for Sparse Predictive Analytics
+[5] Deep & Cross Network for Ad Click Predictions
 
-[6] Attentional Factorization Machines:Learning theWeight of Feature Interactions via Attention Networks
+[6] Deep Interest Network for Click-Through Rate Prediction
 
-[7] https://github.com/Atomu2014/product-nets
+[7] Neural Factorization Machines for Sparse Predictive Analytics
 
-[8] https://github.com/hexiangnan/attentional_factorization_machine
+[8] Attentional Factorization Machines:Learning theWeight of Feature Interactions via Attention Networks
 
-[9] https://github.com/hexiangnan/neural_factorization_machine
+[9] https://github.com/Atomu2014/product-nets
+
+[10] https://github.com/hexiangnan/attentional_factorization_machine
+
+[11] https://github.com/hexiangnan/neural_factorization_machine

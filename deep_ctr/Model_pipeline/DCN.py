@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 #coding=utf-8
 """
-TensorFlow Implementation of <<Attentional Factorization Machines: Learning the Weight of Feature Interactions via Attention Networks>>
-with the fellowing features：
+TensorFlow Implementation of <<Deep & Cross Network for Ad Click Predictions>> with the fellowing features：
 #1 Input pipline using Dataset high level API, Support parallel and prefetch reading
 #2 Train pipline using Coustom Estimator by rewriting model_fn
-#3 Support distincted training by TF_CONFIG
-#4 Support export model for online predicting service using TensorFlow Serving
+#3 Support distincted training using TF_CONFIG
+#4 Support export_model for TensorFlow Serving
 
 by lambdaji
 """
@@ -27,8 +26,8 @@ from time import time
 
 #import math
 import random
-import pandas as pd
-import numpy as np
+#import pandas as pd
+#import numpy as np
 import tensorflow as tf
 
 #################### CMD Arguments ####################
@@ -38,19 +37,22 @@ tf.app.flags.DEFINE_string("ps_hosts", '', "Comma-separated list of hostname:por
 tf.app.flags.DEFINE_string("worker_hosts", '', "Comma-separated list of hostname:port pairs")
 tf.app.flags.DEFINE_string("job_name", '', "One of 'ps', 'worker'")
 tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
-tf.app.flags.DEFINE_integer("num_threads", 10, "Number of threads")
+tf.app.flags.DEFINE_integer("num_threads", 16, "Number of threads")
 tf.app.flags.DEFINE_integer("feature_size", 0, "Number of features")
 tf.app.flags.DEFINE_integer("field_size", 0, "Number of fields")
-tf.app.flags.DEFINE_integer("embedding_size", 256, "Embedding size")
+tf.app.flags.DEFINE_integer("embedding_size", 32, "Embedding size")
 tf.app.flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
-tf.app.flags.DEFINE_integer("batch_size", 128, "Number of batch size")
+tf.app.flags.DEFINE_integer("batch_size", 64, "Number of batch size")
 tf.app.flags.DEFINE_integer("log_steps", 1000, "save summary every steps")
-tf.app.flags.DEFINE_float("learning_rate", 0.1, "learning rate")
-tf.app.flags.DEFINE_float("l2_reg", 1.0, "L2 regularization")
-tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
+tf.app.flags.DEFINE_float("learning_rate", 0.0005, "learning rate")
+tf.app.flags.DEFINE_float("l2_reg", 0.0001, "L2 regularization")
+#tf.app.flags.DEFINE_string("loss_type", 'log_loss', "loss type {square_loss, log_loss}")
 tf.app.flags.DEFINE_string("optimizer", 'Adam', "optimizer type {Adam, Adagrad, GD, Momentum}")
-tf.app.flags.DEFINE_string("attention_layers", '256', "Attention Net mlp layers")
-tf.app.flags.DEFINE_string("dropout", '1.0,0.5', "dropout rate")
+tf.app.flags.DEFINE_string("deep_layers", '256,128,64', "deep layers")
+tf.app.flags.DEFINE_integer("cross_layers", 3, "cross layers, polynomial degree")
+tf.app.flags.DEFINE_string("dropout", '0.5,0.5,0.5', "dropout rate")
+tf.app.flags.DEFINE_boolean("batch_norm", False, "perform batch normaization (True or False)")
+tf.app.flags.DEFINE_float("batch_norm_decay", 0.9, "decay for the moving average(recommend trying decay=0.9)")
 tf.app.flags.DEFINE_string("data_dir", '', "data dir")
 tf.app.flags.DEFINE_string("dt_dir", '', "data dt partition")
 tf.app.flags.DEFINE_string("model_dir", '', "model check point dir")
@@ -104,14 +106,16 @@ def model_fn(features, labels, mode, params):
     embedding_size = params["embedding_size"]
     l2_reg = params["l2_reg"]
     learning_rate = params["learning_rate"]
+    #batch_norm_decay = params["batch_norm_decay"]
     #optimizer = params["optimizer"]
-    layers = map(int, params["attention_layers"].split(','))
+    deep_layers  = map(int, params["deep_layers"].split(','))
+    cross_layers = params["cross_layers"]
     dropout = map(float, params["dropout"].split(','))
 
     #------bulid weights------
-    Global_Bias = tf.get_variable(name='bias', shape=[1], initializer=tf.constant_initializer(0.0))
-    Feat_Bias = tf.get_variable(name='linear', shape=[feature_size], initializer=tf.glorot_normal_initializer())
-    Feat_Emb = tf.get_variable(name='emb', shape=[feature_size,embedding_size], initializer=tf.glorot_normal_initializer())
+    Cross_B = tf.get_variable(name='cross_b', shape=[cross_layers, field_size*embedding_size], initializer=tf.glorot_normal_initializer())
+    Cross_W = tf.get_variable(name='cross_w', shape=[cross_layers, field_size*embedding_size], initializer=tf.glorot_normal_initializer())
+    Feat_Emb = tf.get_variable(name='emb', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
 
     #------build feaure-------
     feat_ids  = features['feat_ids']
@@ -120,51 +124,51 @@ def model_fn(features, labels, mode, params):
     feat_vals = tf.reshape(feat_vals,shape=[-1,field_size])
 
     #------build f(x)------
-    with tf.variable_scope("Linear-part"):
-        feat_wgts = tf.nn.embedding_lookup(Feat_Bias, feat_ids) # None * F * 1
-        y_linear = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
-
-    with tf.variable_scope("Pairwise-Interaction-Layer"):
-        embeddings = tf.nn.embedding_lookup(Feat_Emb, feat_ids) # None * F * K
+    with tf.variable_scope("Embedding-layer"):
+        embeddings = tf.nn.embedding_lookup(Feat_Emb, feat_ids) 		    # None * F * K
         feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
-        embeddings = tf.multiply(embeddings, feat_vals) #vij*xi
+        embeddings = tf.multiply(embeddings, feat_vals) 				    # None * F * K
+        x0 = tf.reshape(embeddings,shape=[-1,field_size*embedding_size])    # None * (F*K)
 
-        num_interactions = field_size*(field_size-1)/2
-        element_wise_product_list = []
-        for i in range(0, field_size):
-            for j in range(i+1, field_size):
-                element_wise_product_list.append(tf.multiply(embeddings[:,i,:], embeddings[:,j,:]))
-        element_wise_product = tf.stack(element_wise_product_list) 								# (F*(F-1)) * None * K
-        element_wise_product = tf.transpose(element_wise_product, perm=[1,0,2]) 				# None * (F*(F-1)) * K
-        #interactions = tf.reduce_sum(element_wise_product, 2, name="interactions")
+    with tf.variable_scope("Cross-Network"):
+        xl = x0
+        for l in range(cross_layers):
+            xlw = tf.tensordot(xl, Cross_W[l], axes=1)                      # None
+            xl = x0 * tf.expand_dims(xlw, -1) + xl + Cross_B[l]             # broadcast
 
-    with tf.variable_scope("Attention-part"):
-        deep_inputs = tf.reshape(element_wise_product, shape=[-1, embedding_size]) 				# (None * (F*(F-1))) * K
-        for i in range(len(layers)):
-            deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
+    with tf.variable_scope("Deep-Network"):
+        if FLAGS.batch_norm:
+            #normalizer_fn = tf.contrib.layers.batch_norm
+            #normalizer_fn = tf.layers.batch_normalization
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                train_phase = True
+                #normalizer_params = {'decay': batch_norm_decay, 'center': True, 'scale': True, 'updates_collections': None, 'is_training': True, 'reuse': None}
+            else:
+                train_phase = False
+                #normalizer_params = {'decay': batch_norm_decay, 'center': True, 'scale': True, 'updates_collections': None, 'is_training': False, 'reuse': True}
+        else:
+            normalizer_fn = None
+            normalizer_params = None
+
+        x_deep = x0
+        for i in range(len(deep_layers)):
+            #if FLAGS.batch_norm:
+            #    deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' %i)
+                #normalizer_params.update({'scope': 'bn_%d' %i})
+            x_deep = tf.contrib.layers.fully_connected(inputs=x_deep, num_outputs=deep_layers[i], \
+                #normalizer_fn=normalizer_fn, normalizer_params=normalizer_params, \
                 weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
+            if FLAGS.batch_norm:
+                x_deep = batch_norm_layer(x_deep, train_phase=train_phase, scope_bn='bn_%d' %i)   #放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                x_deep = tf.nn.dropout(x_deep, keep_prob=dropout[i])                              #Apply Dropout after all BN layers and set dropout=0.8(drop_ratio=0.2)
+                #x_deep = tf.layers.dropout(inputs=x_deep, rate=dropout[i], training=mode == tf.estimator.ModeKeys.TRAIN)
 
-        aij = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='attention_out')# (None * (F*(F-1))) * 1
-
-        #aij_reshape = tf.reshape(aij, shape=[-1, num_interactions, 1])							# None * (F*(F-1)) * 1
-        aij_softmax = tf.nn.softmax(tf.reshape(aij, shape=[-1, num_interactions, 1]), dim=1, name='attention_soft')
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            aij_softmax = tf.nn.dropout(aij_softmax, keep_prob=dropout[0])
-
-    with tf.variable_scope("Attention-based-Pooling"):
-        y_emb = tf.reduce_sum(tf.multiply(aij_softmax, element_wise_product), 1) 				# None * K
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            y_emb = tf.nn.dropout(y_emb, keep_prob=dropout[1])
-
-        y_d = tf.contrib.layers.fully_connected(inputs=y_emb, num_outputs=1, activation_fn=tf.identity, \
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')		# None * 1
-        y_deep = tf.reshape(y_d,shape=[-1])
-
-    with tf.variable_scope("AFM-out"):
-        #y_bias = Global_Bias * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label时不传
-        y_bias = Global_Bias * tf.ones_like(y_deep, dtype=tf.float32)   # None * 1
-        y = y_bias + y_linear + y_deep
+    with tf.variable_scope("DCN-out"):
+        x_stack = tf.concat([xl, x_deep], 1)	# None * ( F*K+ deep_layers[i])
+        x_stack = x_deep	# None * ( F*K+ deep_layers[i])
+        y = tf.contrib.layers.fully_connected(inputs=x_stack, num_outputs=1, activation_fn=tf.identity, weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='out_layer')
+        y = tf.reshape(y,shape=[-1])
         pred = tf.sigmoid(y)
 
     predictions={"prob": pred}
@@ -178,7 +182,7 @@ def model_fn(features, labels, mode, params):
 
     #------bulid loss------
     loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=labels)) + \
-        l2_reg * tf.nn.l2_loss(Feat_Bias) + l2_reg * tf.nn.l2_loss(Feat_Emb)
+        l2_reg * tf.nn.l2_loss(Cross_B) +  l2_reg * tf.nn.l2_loss(Cross_W) + l2_reg * tf.nn.l2_loss(Feat_Emb)
 
     # Provide an estimator spec for `ModeKeys.EVAL`
     eval_metric_ops = {
@@ -218,6 +222,12 @@ def model_fn(features, labels, mode, params):
     #        train_op=train_op,
     #        predictions={"prob": pred},
     #        eval_metric_ops=eval_metric_ops)
+
+def batch_norm_layer(x, train_phase, scope_bn):
+    bn_train = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=True,  reuse=None, scope=scope_bn)
+    bn_infer = tf.contrib.layers.batch_norm(x, decay=FLAGS.batch_norm_decay, center=True, scale=True, updates_collections=None, is_training=False, reuse=True, scope=scope_bn)
+    z = tf.cond(tf.cast(train_phase, tf.bool), lambda: bn_train, lambda: bn_infer)
+    return z
 
 def set_dist_env():
     if FLAGS.dist_mode == 1:        # 本地分布式测试模式1 chief, 1 ps, 1 evaluator
@@ -267,6 +277,32 @@ def set_dist_env():
         os.environ['TF_CONFIG'] = json.dumps(tf_config)
 
 def main(_):
+    #------check Arguments------
+    if FLAGS.dt_dir == "":
+        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
+    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
+
+    print('task_type ', FLAGS.task_type)
+    print('model_dir ', FLAGS.model_dir)
+    print('data_dir ', FLAGS.data_dir)
+    print('dt_dir ', FLAGS.dt_dir)
+    print('num_epochs ', FLAGS.num_epochs)
+    print('feature_size ', FLAGS.feature_size)
+    print('field_size ', FLAGS.field_size)
+    print('embedding_size ', FLAGS.embedding_size)
+    print('batch_size ', FLAGS.batch_size)
+    print('deep_layers ', FLAGS.deep_layers)
+    print('cross_layers ', FLAGS.cross_layers)
+    print('dropout ', FLAGS.dropout)
+    #print('loss_type ', FLAGS.loss_type)
+    print('optimizer ', FLAGS.optimizer)
+    print('learning_rate ', FLAGS.learning_rate)
+    print('batch_norm_decay ', FLAGS.batch_norm_decay)
+    print('batch_norm ', FLAGS.batch_norm)
+    print('l2_reg ', FLAGS.l2_reg)
+
+    #------init Envs------
     tr_files = glob.glob("%s/tr*libsvm" % FLAGS.data_dir)
     random.shuffle(tr_files)
     print("tr_files:", tr_files)
@@ -285,13 +321,16 @@ def main(_):
 
     set_dist_env()
 
+    #------bulid Tasks------
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
         "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
+        "batch_norm_decay": FLAGS.batch_norm_decay,
         "l2_reg": FLAGS.l2_reg,
-        "attention_layers": FLAGS.attention_layers,
+        "deep_layers": FLAGS.deep_layers,
+        "cross_layers": FLAGS.cross_layers,
         "dropout": FLAGS.dropout
     }
     config = tf.estimator.RunConfig().replace(session_config = tf.ConfigProto(device_count={'GPU':0, 'CPU':FLAGS.num_threads}),
@@ -324,27 +363,5 @@ def main(_):
         Estimator.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 if __name__ == "__main__":
-    #------check Arguments------
-    if FLAGS.dt_dir == "":
-        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
-    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
-
-    print('task_type ', FLAGS.task_type)
-    print('model_dir ', FLAGS.model_dir)
-    print('data_dir ', FLAGS.data_dir)
-    print('dt_dir ', FLAGS.dt_dir)
-    print('num_epochs ', FLAGS.num_epochs)
-    print('feature_size ', FLAGS.feature_size)
-    print('field_size ', FLAGS.field_size)
-    print('embedding_size ', FLAGS.embedding_size)
-    print('batch_size ', FLAGS.batch_size)
-    print('attention_layers ', FLAGS.attention_layers)
-    print('dropout ', FLAGS.dropout)
-    print('loss_type ', FLAGS.loss_type)
-    print('optimizer ', FLAGS.optimizer)
-    print('learning_rate ', FLAGS.learning_rate)
-    print('l2_reg ', FLAGS.l2_reg)
-
     tf.logging.set_verbosity(tf.logging.INFO)
     tf.app.run()
