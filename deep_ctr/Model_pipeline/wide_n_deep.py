@@ -15,7 +15,7 @@ import json
 import random
 from datetime import date, timedelta
 
-import numpy as np
+#import numpy as np
 import tensorflow as tf
 
 #################### CMD Arguments ####################
@@ -172,6 +172,24 @@ def set_dist_env():
         os.environ['TF_CONFIG'] = json.dumps(tf_config)
 
 def main(_):
+    #------check Arguments------
+    if FLAGS.dt_dir == "":
+        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
+    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
+
+    print('task_type ', FLAGS.task_type)
+    print('model_type ', FLAGS.model_type)
+    print('model_dir ', FLAGS.model_dir)
+    print('servable_model_dir ', FLAGS.servable_model_dir)
+    print('dt_dir ', FLAGS.dt_dir)
+    print('data_dir ', FLAGS.data_dir)
+    print('num_epochs ', FLAGS.num_epochs)
+    print('embedding_size ', FLAGS.embedding_size)
+    print('deep_layers ', FLAGS.deep_layers)
+    print('batch_size ', FLAGS.batch_size)
+
+    #------init Envs------
     tr_files = glob.glob("%s/tr*csv" % FLAGS.data_dir)
     random.shuffle(tr_files)
     print("tr_files:", tr_files)
@@ -180,6 +198,7 @@ def main(_):
     te_files = glob.glob("%s/te*csv" % FLAGS.data_dir)
     print("te_files:", te_files)
 
+    #------build Tasks------
     #build wide_columns, deep_columns
     wide_columns, deep_columns = build_feature()
 
@@ -212,22 +231,5 @@ def main(_):
         wide_n_deep.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 if __name__ == "__main__":
-    #------check Arguments------
-    if FLAGS.dt_dir == "":
-        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
-    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
-
-    print('task_type ', FLAGS.task_type)
-    print('model_type ', FLAGS.model_type)
-    print('model_dir ', FLAGS.model_dir)
-    print('servable_model_dir ', FLAGS.servable_model_dir)
-    print('dt_dir ', FLAGS.dt_dir)
-    print('data_dir ', FLAGS.data_dir)
-    print('num_epochs ', FLAGS.num_epochs)
-    print('embedding_size ', FLAGS.embedding_size)
-    print('deep_layers ', FLAGS.deep_layers)
-    print('batch_size ', FLAGS.batch_size)
-
     tf.logging.set_verbosity(tf.logging.INFO)
     tf.app.run()

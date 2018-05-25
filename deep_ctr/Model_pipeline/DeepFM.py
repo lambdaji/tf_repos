@@ -26,8 +26,8 @@ from time import time
 
 #import math
 import random
-import pandas as pd
-import numpy as np
+#import pandas as pd
+#import numpy as np
 import tensorflow as tf
 
 #################### CMD Arguments ####################
@@ -107,7 +107,7 @@ def model_fn(features, labels, mode, params):
     learning_rate = params["learning_rate"]
     #batch_norm_decay = params["batch_norm_decay"]
     #optimizer = params["optimizer"]
-    layers = map(int, params["deep_layers"].split(','))
+    layers  = map(int, params["deep_layers"].split(','))
     dropout = map(float, params["dropout"].split(','))
 
     #------bulid weights------
@@ -123,13 +123,13 @@ def model_fn(features, labels, mode, params):
 
     #------build f(x)------
     with tf.variable_scope("First-order"):
-        feat_wgts = tf.nn.embedding_lookup(FM_W, feat_ids) # None * F * 1
+        feat_wgts = tf.nn.embedding_lookup(FM_W, feat_ids)              # None * F * 1
         y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
 
     with tf.variable_scope("Second-order"):
-        embeddings = tf.nn.embedding_lookup(FM_V, feat_ids) # None * F * K
+        embeddings = tf.nn.embedding_lookup(FM_V, feat_ids)             # None * F * K
         feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
-        embeddings = tf.multiply(embeddings, feat_vals) #vij*xi
+        embeddings = tf.multiply(embeddings, feat_vals)                 #vij*xi
         sum_square = tf.square(tf.reduce_sum(embeddings,1))
         square_sum = tf.reduce_sum(tf.square(embeddings),1)
         y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
@@ -171,7 +171,7 @@ def model_fn(features, labels, mode, params):
 
     with tf.variable_scope("DeepFM-out"):
         #y_bias = FM_B * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label时不传
-        y_bias = FM_B * tf.ones_like(y_d, dtype=tf.float32)     # None * 1
+        y_bias = FM_B * tf.ones_like(y_d, dtype=tf.float32)      # None * 1
         y = y_bias + y_w + y_v + y_d
         pred = tf.sigmoid(y)
 
@@ -187,7 +187,7 @@ def model_fn(features, labels, mode, params):
     #------bulid loss------
     loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=labels)) + \
         l2_reg * tf.nn.l2_loss(FM_W) + \
-        l2_reg * tf.nn.l2_loss(FM_V) #+ \ l2_reg * tf.nn.l2_loss(sig_wgts)
+        l2_reg * tf.nn.l2_loss(FM_V)
 
     # Provide an estimator spec for `ModeKeys.EVAL`
     eval_metric_ops = {
@@ -282,6 +282,31 @@ def set_dist_env():
         os.environ['TF_CONFIG'] = json.dumps(tf_config)
 
 def main(_):
+    #------check Arguments------
+    if FLAGS.dt_dir == "":
+        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
+    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
+
+    print('task_type ', FLAGS.task_type)
+    print('model_dir ', FLAGS.model_dir)
+    print('data_dir ', FLAGS.data_dir)
+    print('dt_dir ', FLAGS.dt_dir)
+    print('num_epochs ', FLAGS.num_epochs)
+    print('feature_size ', FLAGS.feature_size)
+    print('field_size ', FLAGS.field_size)
+    print('embedding_size ', FLAGS.embedding_size)
+    print('batch_size ', FLAGS.batch_size)
+    print('deep_layers ', FLAGS.deep_layers)
+    print('dropout ', FLAGS.dropout)
+    print('loss_type ', FLAGS.loss_type)
+    print('optimizer ', FLAGS.optimizer)
+    print('learning_rate ', FLAGS.learning_rate)
+    print('batch_norm_decay ', FLAGS.batch_norm_decay)
+    print('batch_norm ', FLAGS.batch_norm)
+    print('l2_reg ', FLAGS.l2_reg)
+
+    #------init Envs------
     tr_files = glob.glob("%s/tr*libsvm" % FLAGS.data_dir)
     random.shuffle(tr_files)
     print("tr_files:", tr_files)
@@ -300,6 +325,7 @@ def main(_):
 
     set_dist_env()
 
+    #------bulid Tasks------
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
@@ -340,29 +366,5 @@ def main(_):
         DeepFM.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 if __name__ == "__main__":
-    #------check Arguments------
-    if FLAGS.dt_dir == "":
-        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
-    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
-
-    print('task_type ', FLAGS.task_type)
-    print('model_dir ', FLAGS.model_dir)
-    print('data_dir ', FLAGS.data_dir)
-    print('dt_dir ', FLAGS.dt_dir)
-    print('num_epochs ', FLAGS.num_epochs)
-    print('feature_size ', FLAGS.feature_size)
-    print('field_size ', FLAGS.field_size)
-    print('embedding_size ', FLAGS.embedding_size)
-    print('batch_size ', FLAGS.batch_size)
-    print('deep_layers ', FLAGS.deep_layers)
-    print('dropout ', FLAGS.dropout)
-    print('loss_type ', FLAGS.loss_type)
-    print('optimizer ', FLAGS.optimizer)
-    print('learning_rate ', FLAGS.learning_rate)
-    print('batch_norm_decay ', FLAGS.batch_norm_decay)
-    print('batch_norm ', FLAGS.batch_norm)
-    print('l2_reg ', FLAGS.l2_reg)
-
     tf.logging.set_verbosity(tf.logging.INFO)
     tf.app.run()

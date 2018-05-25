@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 #coding=utf-8
 """
-TensorFlow Implementation of <<Deep Learning over Multi-Field Categorical Data: A Case Study on User Response Prediction>>
-and <<Product-based Neural Networks for User Response Prediction>> with the fellowing features：
+TensorFlow Implementation of <<DeepFM: A Factorization-Machine based Neural Network for CTR Prediction>> with the fellowing features：
 #1 Input pipline using Dataset high level API, Support parallel and prefetch reading
 #2 Train pipline using Coustom Estimator by rewriting model_fn
-#3 Support distincted training by TF_CONFIG
-#4 Support export servable model for TensorFlow Serving
+#3 Support distincted training using TF_CONFIG
+#4 Support export_model for TensorFlow Serving
 
 by lambdaji
 """
@@ -58,7 +57,6 @@ tf.app.flags.DEFINE_string("dt_dir", '', "data dt partition")
 tf.app.flags.DEFINE_string("model_dir", '', "model check point dir")
 tf.app.flags.DEFINE_string("servable_model_dir", '', "export servable model for TensorFlow Serving")
 tf.app.flags.DEFINE_string("task_type", 'train', "task type {train, infer, eval, export}")
-tf.app.flags.DEFINE_string("model_type", 'Inner', "model type {FNN, Inner, Outer}")
 tf.app.flags.DEFINE_boolean("clear_existing_model", False, "clear existing model or not")
 
 #1 1:0.5 2:0.03519 3:1 4:0.02567 7:0.03708 8:0.01705 9:0.06296 10:0.18185 11:0.02497 12:1 14:0.02565 15:0.03267 17:0.0247 18:0.03158 20:1 22:1 23:0.13169 24:0.02933 27:0.18159 31:0.0177 34:0.02888 38:1 51:1 63:1 132:1 164:1 236:1
@@ -107,90 +105,83 @@ def model_fn(features, labels, mode, params):
     embedding_size = params["embedding_size"]
     l2_reg = params["l2_reg"]
     learning_rate = params["learning_rate"]
+    #batch_norm_decay = params["batch_norm_decay"]
     #optimizer = params["optimizer"]
-    layers = map(int, params["deep_layers"].split(','))
+    layers  = map(int, params["deep_layers"].split(','))
     dropout = map(float, params["dropout"].split(','))
-    num_pairs = field_size * (field_size - 1) / 2
 
     #------bulid weights------
-    Global_Bias = tf.get_variable(name='bias', shape=[1], initializer=tf.constant_initializer(0.0))
-    Feat_Bias = tf.get_variable(name='linear', shape=[feature_size], initializer=tf.glorot_normal_initializer())
-    Feat_Emb = tf.get_variable(name='emb', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
-    #Prod_Kernel = tf.get_variable(name='kernel', shape=[embedding_size, num_pairs, embedding_size], initializer=tf.glorot_normal_initializer())
-
+    #FM_B = tf.get_variable(name='fm_bias', shape=[1], initializer=tf.constant_initializer(0.0))
+    #FM_W = tf.get_variable(name='fm_w', shape=[feature_size], initializer=tf.glorot_normal_initializer())
+    #FM_V = tf.get_variable(name='fm_v', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
+    MVM_W = tf.get_variable(name='mvm_w', shape=[feature_size, embedding_size], initializer=tf.glorot_normal_initializer())
+    MVM_B = tf.get_variable(name='mvm_b', shape=[field_size, embedding_size], initializer=tf.glorot_normal_initializer())
 
     #------build feaure-------
-    feat_ids  = features['feat_ids']									# None * F * 1
+    feat_ids  = features['feat_ids']
     feat_ids = tf.reshape(feat_ids,shape=[-1,field_size])
-    feat_vals = features['feat_vals']									# None * F * 1
+    feat_vals = features['feat_vals']
     feat_vals = tf.reshape(feat_vals,shape=[-1,field_size])
 
     #------build f(x)------
-    with tf.variable_scope("Linear-part"):
-        feat_wgts = tf.nn.embedding_lookup(Feat_Bias, feat_ids) 		# None * F * 1
-        y_linear = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
+    #with tf.variable_scope("First-order"):
+    #    feat_wgts = tf.nn.embedding_lookup(FM_W, feat_ids) # None * F * 1
+    #    y_w = tf.reduce_sum(tf.multiply(feat_wgts, feat_vals),1)
+
+    #with tf.variable_scope("Second-order"):
+    #    embeddings = tf.nn.embedding_lookup(FM_V, feat_ids) # None * F * K
+    #    feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
+    #    embeddings = tf.multiply(embeddings, feat_vals) #vij*xi
+    #    sum_square = tf.square(tf.reduce_sum(embeddings,1))
+    #    square_sum = tf.reduce_sum(tf.square(embeddings),1)
+    #    y_v = 0.5*tf.reduce_sum(tf.subtract(sum_square, square_sum),1)	# None * 1
 
     with tf.variable_scope("Embedding-layer"):
-        embeddings = tf.nn.embedding_lookup(Feat_Emb, feat_ids) 		# None * F * K
+        embeddings = tf.nn.embedding_lookup(MVM_W, feat_ids) 		    # None * F * K
         feat_vals = tf.reshape(feat_vals, shape=[-1, field_size, 1])
         embeddings = tf.multiply(embeddings, feat_vals) 				# None * F * K
 
-    with tf.variable_scope("Product-layer"):
-		if FLAGS.model_type == 'FNN':
-			deep_inputs = tf.reshape(embeddings,shape=[-1,field_size*embedding_size])
-		elif FLAGS.model_type == 'Inner':
-			row = []
-			col = []
-			for i in range(field_size-1):
-				for j in range(i+1, field_size):
-					row.append(i)
-					col.append(j)
-			p = tf.gather(embeddings, row, axis=1)
-			q = tf.gather(embeddings, col, axis=1)
-	        #p = tf.reshape(p, [-1, num_pairs, embedding_size])
-            #q = tf.reshape(q, [-1, num_pairs, embedding_size])
-			inner = tf.reshape(tf.reduce_sum(p * q, [-1]), [-1, num_pairs])										# None * (F*(F-1)/2)
-			deep_inputs = tf.concat([tf.reshape(embeddings,shape=[-1,field_size*embedding_size]), inner], 1)	# None * ( F*K+F*(F-1)/2 )
-		elif FLAGS.model_type == 'Outer':             #ERROR: NOT ready yet
-			row = []
-			col = []
-			for i in range(field_size-1):
-				for j in range(i+1, field_size):
-					row.append(i)
-					col.append(j)
-			p = tf.gather(embeddings, row, axis=1)
-			q = tf.gather(embeddings, col, axis=1)
-	        #p = tf.reshape(p, [-1, num_pairs, embedding_size])
-            #q = tf.reshape(q, [-1, num_pairs, embedding_size])
-			#einsum('i,j->ij', p, q)  # output[i,j] = p[i]*q[j]				# Outer product
-			outer = tf.reshape(tf.einsum('api,apj->apij', p, q), [-1, num_pairs*embedding_size*embedding_size])	# None * (F*(F-1)/2*K*K)
-			deep_inputs = tf.concat([tf.reshape(embeddings,shape=[-1,field_size*embedding_size]), outer], 1)	# None * ( F*K+F*(F-1)/2*K*K )
+    with tf.variable_scope("MVM-part"):
+        all_order  = tf.add(embeddings, MVM_B)
+        x_mvm   = all_order[:,0,:]                                      # None * 1 * K
+        for i in range(1, field_size):
+            x_mvm = tf.multiply(x_mvm, all_order[:,i,:])
 
+        x_mvm   =  tf.reshape(x_mvm, shape=[-1, embedding_size])        # None * K
 
     with tf.variable_scope("Deep-part"):
-        if mode == tf.estimator.ModeKeys.TRAIN:
-            train_phase = True
-        else:
-            train_phase = False
-
-        for i in range(len(layers)):
-            deep_inputs = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=layers[i], \
-            	weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
-
-            if FLAGS.batch_norm:
-				deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' %i)   	#放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
+        if FLAGS.batch_norm:
+            #normalizer_fn = tf.contrib.layers.batch_norm
+            #normalizer_fn = tf.layers.batch_normalization
             if mode == tf.estimator.ModeKeys.TRAIN:
-				deep_inputs = tf.nn.dropout(deep_inputs, keep_prob=dropout[i])                              	#Apply Dropout after all BN layers and set dropout=0.8(drop_ratio=0.2)
-            	#deep_inputs = tf.layers.dropout(inputs=deep_inputs, rate=dropout[i], training=mode == tf.estimator.ModeKeys.TRAIN)
+                train_phase = True
+                #normalizer_params = {'decay': batch_norm_decay, 'center': True, 'scale': True, 'updates_collections': None, 'is_training': True, 'reuse': None}
+            else:
+                train_phase = False
+                #normalizer_params = {'decay': batch_norm_decay, 'center': True, 'scale': True, 'updates_collections': None, 'is_training': False, 'reuse': True}
+        else:
+            normalizer_fn = None
+            normalizer_params = None
 
-        y_deep = tf.contrib.layers.fully_connected(inputs=deep_inputs, num_outputs=1, activation_fn=tf.identity, \
-            weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
-        y_d = tf.reshape(y_deep,shape=[-1])
+        x_deep = tf.reshape(embeddings,shape=[-1,field_size*embedding_size]) # None * (F*K)
+        for i in range(len(layers)):
+            #if FLAGS.batch_norm:
+            #    deep_inputs = batch_norm_layer(deep_inputs, train_phase=train_phase, scope_bn='bn_%d' %i)
+                #normalizer_params.update({'scope': 'bn_%d' %i})
+            x_deep = tf.contrib.layers.fully_connected(inputs=x_deep, num_outputs=layers[i], \
+                #normalizer_fn=normalizer_fn, normalizer_params=normalizer_params, \
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='mlp%d' % i)
+            if FLAGS.batch_norm:
+                x_deep = batch_norm_layer(x_deep, train_phase=train_phase, scope_bn='bn_%d' %i)   #放在RELU之后 https://github.com/ducha-aiki/caffenet-benchmark/blob/master/batchnorm.md#bn----before-or-after-relu
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                x_deep = tf.nn.dropout(x_deep, keep_prob=dropout[i])                              #Apply Dropout after all BN layers and set dropout=0.8(drop_ratio=0.2)
+                #x_deep = tf.layers.dropout(inputs=x_deep, rate=dropout[i], training=mode == tf.estimator.ModeKeys.TRAIN)
 
-    with tf.variable_scope("PNN-out"):
-        #y_bias = Global_Bias * tf.ones_like(labels, dtype=tf.float32)  # None * 1  warning;这里不能用label，否则调用predict/export函数会出错，train/evaluate正常；初步判断estimator做了优化，用不到label是不传
-        y_bias = Global_Bias * tf.ones_like(y_d, dtype=tf.float32)      # None * 1
-        y = y_bias + y_linear + y_d
+    with tf.variable_scope("DeepMVM-out"):
+        x_stack = tf.concat([x_mvm, x_deep], axis=1)	# None * ( F*K+ deep_layers[i])
+        y_deep = tf.contrib.layers.fully_connected(inputs=x_stack, num_outputs=1, activation_fn=tf.identity, \
+                weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='deep_out')
+        y = tf.reshape(y_deep,shape=[-1])
         pred = tf.sigmoid(y)
 
     predictions={"prob": pred}
@@ -204,7 +195,8 @@ def model_fn(features, labels, mode, params):
 
     #------bulid loss------
     loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=y, labels=labels)) + \
-        l2_reg * tf.nn.l2_loss(Feat_Bias) + l2_reg * tf.nn.l2_loss(Feat_Emb)
+        l2_reg * tf.nn.l2_loss(MVM_W) + \
+        l2_reg * tf.nn.l2_loss(MVM_B)
 
     # Provide an estimator spec for `ModeKeys.EVAL`
     eval_metric_ops = {
@@ -306,7 +298,6 @@ def main(_):
     #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
 
     print('task_type ', FLAGS.task_type)
-    print('model_type ', FLAGS.model_type)
     print('model_dir ', FLAGS.model_dir)
     print('data_dir ', FLAGS.data_dir)
     print('dt_dir ', FLAGS.dt_dir)
@@ -320,6 +311,8 @@ def main(_):
     print('loss_type ', FLAGS.loss_type)
     print('optimizer ', FLAGS.optimizer)
     print('learning_rate ', FLAGS.learning_rate)
+    print('batch_norm_decay ', FLAGS.batch_norm_decay)
+    print('batch_norm ', FLAGS.batch_norm)
     print('l2_reg ', FLAGS.l2_reg)
 
     #------init Envs------
@@ -341,16 +334,15 @@ def main(_):
 
     set_dist_env()
 
-    #------bulid Tasks------
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
         "embedding_size": FLAGS.embedding_size,
         "learning_rate": FLAGS.learning_rate,
+        "batch_norm_decay": FLAGS.batch_norm_decay,
         "l2_reg": FLAGS.l2_reg,
         "deep_layers": FLAGS.deep_layers,
-		"model_type": FLAGS.model_type,
-		"dropout": FLAGS.dropout
+        "dropout": FLAGS.dropout
     }
     config = tf.estimator.RunConfig().replace(session_config = tf.ConfigProto(device_count={'GPU':0, 'CPU':FLAGS.num_threads}),
             log_step_count_steps=FLAGS.log_steps, save_summary_steps=FLAGS.log_steps)

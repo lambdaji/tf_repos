@@ -133,8 +133,9 @@ def model_fn(features, labels, mode, params):
     with tf.variable_scope("Cross-Network"):
         xl = x0
         for l in range(cross_layers):
-            xlw = tf.tensordot(xl, Cross_W[l], axes=1)                      # None
-            xl = x0 * tf.expand_dims(xlw, -1) + xl + Cross_B[l]             # broadcast
+            wl = tf.reshape(Cross_W[l],shape=[-1,1])                        # (F*K) * 1
+            xlw = tf.matmul(xl, wl)                                         # None * 1
+            xl = x0 * xlw + xl + Cross_B[l]                                 # None * (F*K) broadcast
 
     with tf.variable_scope("Deep-Network"):
         if FLAGS.batch_norm:
@@ -166,7 +167,6 @@ def model_fn(features, labels, mode, params):
 
     with tf.variable_scope("DCN-out"):
         x_stack = tf.concat([xl, x_deep], 1)	# None * ( F*K+ deep_layers[i])
-        x_stack = x_deep	# None * ( F*K+ deep_layers[i])
         y = tf.contrib.layers.fully_connected(inputs=x_stack, num_outputs=1, activation_fn=tf.identity, weights_regularizer=tf.contrib.layers.l2_regularizer(l2_reg), scope='out_layer')
         y = tf.reshape(y,shape=[-1])
         pred = tf.sigmoid(y)

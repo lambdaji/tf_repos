@@ -1,4 +1,4 @@
-## TensorFlow Estimator of DeepCTR - DeepFM/wide_n_deep/FNN/PNN/NFM/AFM
+## TensorFlow Estimator of DeepCTR - DeepFM/wide_n_deep/FNN/PNN/NFM/AFM/DCN
 深度学习在ctr预估领域的应用越来越多，新的模型结构层出不穷。但是这些模型如何验证是否有效，快速在工业界落地仍然存在一些问题：
 
 * 开源的实现基本都是学术界的人在搞，距离工业应用还有较大的鸿沟
@@ -33,7 +33,7 @@ DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大
     python get_criteo_feature.py --input_dir=../../data/criteo/ --output_dir=../../data/criteo/ --cutoff=200
 
 ### 训练框架 -- samples in，model out
-用Tensorflow (version: 1.4)作为训练框架，目前实现了DeepFM/wide_n_deep/FNN/PNN/NFM/AFM等算法，除了wide_n_deep，其他算法默认参数.
+用Tensorflow (version: 1.4)作为训练框架，目前实现了DeepFM/wide_n_deep/FNN/PNN/NFM/AFM/Deep & Cross Network等算法，除了wide_n_deep，其他算法默认参数.
 
 ![tensorboard_auc.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/tensorboard_auc.png)
 

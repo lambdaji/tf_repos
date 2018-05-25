@@ -27,8 +27,8 @@ from time import time
 
 #import math
 import random
-import pandas as pd
-import numpy as np
+#import pandas as pd
+#import numpy as np
 import tensorflow as tf
 
 #################### CMD Arguments ####################
@@ -267,6 +267,29 @@ def set_dist_env():
         os.environ['TF_CONFIG'] = json.dumps(tf_config)
 
 def main(_):
+    #------check Arguments------
+    if FLAGS.dt_dir == "":
+        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
+    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
+    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
+
+    print('task_type ', FLAGS.task_type)
+    print('model_dir ', FLAGS.model_dir)
+    print('data_dir ', FLAGS.data_dir)
+    print('dt_dir ', FLAGS.dt_dir)
+    print('num_epochs ', FLAGS.num_epochs)
+    print('feature_size ', FLAGS.feature_size)
+    print('field_size ', FLAGS.field_size)
+    print('embedding_size ', FLAGS.embedding_size)
+    print('batch_size ', FLAGS.batch_size)
+    print('attention_layers ', FLAGS.attention_layers)
+    print('dropout ', FLAGS.dropout)
+    print('loss_type ', FLAGS.loss_type)
+    print('optimizer ', FLAGS.optimizer)
+    print('learning_rate ', FLAGS.learning_rate)
+    print('l2_reg ', FLAGS.l2_reg)
+
+    #------init Envs------
     tr_files = glob.glob("%s/tr*libsvm" % FLAGS.data_dir)
     random.shuffle(tr_files)
     print("tr_files:", tr_files)
@@ -285,6 +308,7 @@ def main(_):
 
     set_dist_env()
 
+    #------bulid Tasks------
     model_params = {
         "field_size": FLAGS.field_size,
         "feature_size": FLAGS.feature_size,
@@ -324,27 +348,5 @@ def main(_):
         Estimator.export_savedmodel(FLAGS.servable_model_dir, serving_input_receiver_fn)
 
 if __name__ == "__main__":
-    #------check Arguments------
-    if FLAGS.dt_dir == "":
-        FLAGS.dt_dir = (date.today() + timedelta(-1)).strftime('%Y%m%d')
-    FLAGS.model_dir = FLAGS.model_dir + FLAGS.dt_dir
-    #FLAGS.data_dir  = FLAGS.data_dir + FLAGS.dt_dir
-
-    print('task_type ', FLAGS.task_type)
-    print('model_dir ', FLAGS.model_dir)
-    print('data_dir ', FLAGS.data_dir)
-    print('dt_dir ', FLAGS.dt_dir)
-    print('num_epochs ', FLAGS.num_epochs)
-    print('feature_size ', FLAGS.feature_size)
-    print('field_size ', FLAGS.field_size)
-    print('embedding_size ', FLAGS.embedding_size)
-    print('batch_size ', FLAGS.batch_size)
-    print('attention_layers ', FLAGS.attention_layers)
-    print('dropout ', FLAGS.dropout)
-    print('loss_type ', FLAGS.loss_type)
-    print('optimizer ', FLAGS.optimizer)
-    print('learning_rate ', FLAGS.learning_rate)
-    print('l2_reg ', FLAGS.l2_reg)
-
     tf.logging.set_verbosity(tf.logging.INFO)
     tf.app.run()
