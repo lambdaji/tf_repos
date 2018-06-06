@@ -37,6 +37,13 @@ DNN做ctr预估的优势在于对大规模离散特征建模，paper关注点大
 
 ![tensorboard_auc.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/tensorboard_auc.png)
 
+其实很多模型结构的表达能力都是同等的，性能上的差异主要是由于某些结构比其他结构更容易优化导致的。下图是固定同一组超参比较不同网络结构的特性，可以发现：
+- FNN/Inner-PNN/DeepFM/DCN几个算法AUC=0.8±0.003
+- 结构相对简单的FNN收敛较慢，但是AUC能够达到0.8!
+- DeepFM&DCN通过shallow part把反馈信号传回embedding层，收敛得更快。
+
+![same_hyper.png](https://github.com/lambdaji/tf_repos/raw/master/deep_ctr/uploads/same_hyper.png)
+
 以DeepFM为例来看看如何使用：
 
 ``train``:

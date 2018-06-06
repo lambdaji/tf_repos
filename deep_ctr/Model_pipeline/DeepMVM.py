@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #coding=utf-8
 """
-TensorFlow Implementation of <<DeepFM: A Factorization-Machine based Neural Network for CTR Prediction>> with the fellowing features：
+TensorFlow Implementation of Deep & Multi-view Machines with the fellowing features：
 #1 Input pipline using Dataset high level API, Support parallel and prefetch reading
 #2 Train pipline using Coustom Estimator by rewriting model_fn
 #3 Support distincted training using TF_CONFIG
