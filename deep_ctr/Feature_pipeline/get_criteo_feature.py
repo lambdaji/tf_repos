@@ -1,4 +1,4 @@
-#coding=utf8
+# coding=utf8
 """
 This code referenced from [here](https://github.com/PaddlePaddle/models/blob/develop/deep_fm/preprocess.py)
 -For numerical features,normalzied to continous values.
@@ -10,7 +10,7 @@ TODO：
 """
 import os
 import sys
-#import click
+# import click
 import random
 import collections
 import argparse
@@ -58,7 +58,7 @@ class CategoryDictGenerator:
         return res
 
     def dicts_sizes(self):
-        return map(len, self.dicts)
+        return list(map(len, self.dicts))
 
 
 class ContinuousFeatureGenerator:
@@ -68,8 +68,8 @@ class ContinuousFeatureGenerator:
 
     def __init__(self, num_feature):
         self.num_feature = num_feature
-        self.min = [sys.maxint] * num_feature
-        self.max = [-sys.maxint] * num_feature
+        self.min = [sys.maxsize] * num_feature
+        self.max = [-sys.maxsize] * num_feature
 
     def build(self, datafile, continous_features):
         with open(datafile, 'r') as f:
@@ -91,9 +91,9 @@ class ContinuousFeatureGenerator:
         return (val - self.min[idx]) / (self.max[idx] - self.min[idx])
 
 
-#@click.command("preprocess")
-#@click.option("--datadir", type=str, help="Path to raw criteo dataset")
-#@click.option("--outdir", type=str, help="Path to save the processed data")
+# @click.command("preprocess")
+# @click.option("--datadir", type=str, help="Path to raw criteo dataset")
+# @click.option("--outdir", type=str, help="Path to save the processed data")
 def preprocess(datadir, outdir):
     """
     All the 13 integer features are normalzied to continous values and these
@@ -101,28 +101,28 @@ def preprocess(datadir, outdir):
     Each of the 26 categorical features are one-hot encoded and all the one-hot
     vectors are combined into one sparse binary vector.
     """
-    #pool = ThreadPool(FLAGS.threads) # Sets the pool size
+    # pool = ThreadPool(FLAGS.threads) # Sets the pool size
     dists = ContinuousFeatureGenerator(len(continous_features))
     dists.build(FLAGS.input_dir + 'train.txt', continous_features)
-    #pool.apply(dists.build, args=(FLAGS.input_dir + 'train.txt', continous_features,))
+    # pool.apply(dists.build, args=(FLAGS.input_dir + 'train.txt', continous_features,))
 
     dicts = CategoryDictGenerator(len(categorial_features))
     dicts.build(FLAGS.input_dir + 'train.txt', categorial_features, cutoff=FLAGS.cutoff)
-    #pool.apply(dicts.build, args=(FLAGS.input_dir + 'train.txt', categorial_features,))
+    # pool.apply(dicts.build, args=(FLAGS.input_dir + 'train.txt', categorial_features,))
 
-    #pool.close()
-    #pool.join()
+    # pool.close()
+    # pool.join()
 
-    output = open(FLAGS.output_dir + 'feature_map','w')
+    output = open(FLAGS.output_dir + 'feature_map', 'w')
     for i in continous_features:
-        output.write("{0} {1}\n".format('I'+str(i), i))
+        output.write("{0} {1}\n".format('I' + str(i), i))
     dict_sizes = dicts.dicts_sizes()
     categorial_feature_offset = [dists.num_feature]
-    for i in range(1, len(categorial_features)+1):
+    for i in range(1, len(categorial_features) + 1):
         offset = categorial_feature_offset[i - 1] + dict_sizes[i - 1]
         categorial_feature_offset.append(offset)
-        for key, val in dicts.dicts[i-1].iteritems():
-            output.write("{0} {1}\n".format('C'+str(i)+'|'+key, categorial_feature_offset[i - 1]+val+1))
+        for key, val in dicts.dicts[i - 1].items():
+            output.write("{0} {1}\n".format('C' + str(i) + '|' + key, categorial_feature_offset[i - 1] + val + 1))
 
     random.seed(0)
 
@@ -137,7 +137,8 @@ def preprocess(datadir, outdir):
                     feat_vals = []
                     for i in range(0, len(continous_features)):
                         val = dists.gen(i, features[continous_features[i]])
-                        feat_vals.append(str(continous_features[i]) + ':' + "{0:.6f}".format(val).rstrip('0').rstrip('.'))
+                        feat_vals.append(
+                            str(continous_features[i]) + ':' + "{0:.6f}".format(val).rstrip('0').rstrip('.'))
 
                     for i in range(0, len(categorial_features)):
                         val = dicts.gen(i, features[categorial_features[i]]) + categorial_feature_offset[i]
@@ -173,25 +174,25 @@ if __name__ == "__main__":
         type=int,
         default=2,
         help="threads num"
-        )
+    )
     parser.add_argument(
         "--input_dir",
         type=str,
         default="",
         help="input data dir"
-        )
+    )
     parser.add_argument(
         "--output_dir",
         type=str,
         default="",
         help="feature map output dir"
-        )
+    )
     parser.add_argument(
         "--cutoff",
         type=int,
         default=200,
         help="cutoff long-tailed categorical values"
-        )
+    )
 
     FLAGS, unparsed = parser.parse_known_args()
     print('threads ', FLAGS.threads)
