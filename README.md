@@ -4,5 +4,4 @@
 - DeepRL：   Deep-Reinforcement Learing
 - DeepMTL：  Multi-task Learning
 - DeepTXT：  DSSM等文本相关深度学习算法
-
-Welcome to pull requests!
+Bonqure to pull requests!
